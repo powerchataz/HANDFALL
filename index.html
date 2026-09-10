@@ -104,6 +104,7 @@
   .guide-toggle:hover{ border-color:var(--amber); color:var(--amber); }
   .guide-toggle:focus-visible{ outline:2px solid var(--amber); outline-offset:2px; }
   .guide-toggle .ic{ font-size:14px; }
+  .guide-toggle.tri{ padding:10px 4px; font-size:10.5px; gap:5px; white-space:nowrap; }
 
   .modal.wide{ max-width:440px; max-height:min(80vh,640px); overflow-y:auto; }
   .close-x{
@@ -166,6 +167,14 @@
   .achv-row .ad{ font-size:11.5px; color:var(--ink-dim); margin-top:2px; }
   .achv-row.locked .ad{ color:var(--ink-faint); }
 
+  .history-row{ display:flex; align-items:center; justify-content:space-between; gap:10px; padding:9px 0; border-bottom:1px solid var(--felt-edge); }
+  .history-row:last-child{ border-bottom:none; }
+  .history-row .hs{ font-family:'Space Mono',monospace; font-weight:700; font-size:15px; color:var(--amber); flex:0 0 auto; min-width:56px; }
+  .history-row .hmeta{ display:flex; flex-direction:column; gap:1px; min-width:0; flex:1 1 auto; }
+  .history-row .hb{ font-family:'Unbounded',sans-serif; font-weight:700; font-size:11.5px; }
+  .history-row .hd{ font-size:10.5px; color:var(--ink-faint); font-family:'Space Mono',monospace; }
+  .history-empty{ text-align:center; font-size:12px; color:var(--ink-faint); padding:18px 0; }
+
   .overlay{ position:fixed; inset:0; background:rgba(9,7,13,.72); backdrop-filter:blur(3px); display:flex; align-items:center; justify-content:center; padding:20px; z-index:10; }
   .overlay[hidden]{display:none;}
   .modal{ width:100%; max-width:420px; background:linear-gradient(165deg,#251d31,#150f1c); border:1px solid var(--felt-edge); border-radius:18px; padding:22px 20px 20px; box-shadow:0 40px 80px -30px rgba(0,0,0,.8); }
@@ -222,9 +231,10 @@
 
   <p class="hint"><b>Move</b> to aim &middot; <b>tap / click</b> to drop &middot; any 2&ndash;5 touching cards that form a poker hand clear together &mdash; that's your only real relief from overflow. Stay calm and a Bonus Draw will occasionally appear above.</p>
 
-  <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
-    <button class="guide-toggle" id="guideBtn" type="button"><span class="ic">🂡</span> Hand guide</button>
-    <button class="guide-toggle" id="achvBtn" type="button"><span class="ic">🏆</span> Achievements</button>
+  <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px;">
+    <button class="guide-toggle tri" id="guideBtn" type="button"><span class="ic">🂡</span> Guide</button>
+    <button class="guide-toggle tri" id="achvBtn" type="button"><span class="ic">🏆</span> Achv.</button>
+    <button class="guide-toggle tri" id="historyBtn" type="button"><span class="ic">📜</span> History</button>
   </div>
 </div>
 
@@ -243,6 +253,16 @@
     <h2 id="achvTitle">Achievements</h2>
     <p class="sub" id="achvSummary">Loading&hellip;</p>
     <div id="achvList"></div>
+  </div>
+</div>
+
+<div class="overlay" id="historyOverlay" hidden>
+  <div class="modal wide" role="dialog" aria-modal="true" aria-labelledby="historyTitle" style="position:relative;">
+    <button class="close-x" id="historyClose" type="button" aria-label="Close run history">&times;</button>
+    <h2 id="historyTitle">Run History</h2>
+    <p class="sub" id="historySummary">Loading&hellip;</p>
+    <div id="historyList"></div>
+    <button class="guide-toggle" id="historyClearBtn" type="button" style="margin-top:6px;">Clear history</button>
   </div>
 </div>
 
@@ -268,8 +288,11 @@
   // ---------- persistence ----------
   var SAVE_KEY = "handfall_save_v1";
   var ACHV_KEY = "handfall_achv_v1";
+  var HISTORY_KEY = "handfall_history_v1";
+  var HISTORY_MAX = 20;
   var saved = { best: 0 };
   var unlockedAchv = {};
+  var runHistory = [];
   try {
     var raw = localStorage.getItem(SAVE_KEY);
     if (raw) { var parsed = JSON.parse(raw); if (parsed && typeof parsed.best === "number") saved.best = parsed.best; }
@@ -278,8 +301,13 @@
     var rawA = localStorage.getItem(ACHV_KEY);
     if (rawA) unlockedAchv = JSON.parse(rawA) || {};
   } catch (e) {}
+  try {
+    var rawH = localStorage.getItem(HISTORY_KEY);
+    if (rawH) { var parsedH = JSON.parse(rawH); if (Array.isArray(parsedH)) runHistory = parsedH; }
+  } catch (e) {}
   function persistBest(){ try { localStorage.setItem(SAVE_KEY, JSON.stringify({ best: saved.best })); } catch (e) {} }
   function persistAchv(){ try { localStorage.setItem(ACHV_KEY, JSON.stringify(unlockedAchv)); } catch (e) {} }
+  function persistHistory(){ try { localStorage.setItem(HISTORY_KEY, JSON.stringify(runHistory)); } catch (e) {} }
 
   // ---------- audio ----------
   var actx = null;
@@ -524,6 +552,48 @@
     if (e.target.id === "achvOverlay") closeAchv();
   });
 
+  // ---------- run history panel ----------
+  function formatDuration(sec){
+    var m = Math.floor(sec/60), s = sec%60;
+    return m + ":" + (s<10?"0":"") + s;
+  }
+  function formatHistoryDate(ts){
+    var d = new Date(ts);
+    return d.toLocaleDateString(undefined, { month:"short", day:"numeric" }) + " " +
+      d.toLocaleTimeString(undefined, { hour:"numeric", minute:"2-digit" });
+  }
+  function buildHistoryPanel(){
+    document.getElementById("historySummary").textContent = runHistory.length
+      ? "Last " + runHistory.length + " run" + (runHistory.length===1?"":"s") + ", most recent first. Kept on this device only."
+      : "No runs recorded yet — play a round to start your history.";
+    var el = document.getElementById("historyList");
+    if (!runHistory.length){
+      el.innerHTML = '<div class="history-empty">Nothing here yet.</div>';
+      return;
+    }
+    el.innerHTML = runHistory.map(function(r){
+      return '<div class="history-row">' +
+        '<span class="hs">' + r.score.toLocaleString() + '</span>' +
+        '<div class="hmeta">' +
+          '<span class="hb">' + (r.bestHand || "No hand cleared") + '</span>' +
+          '<span class="hd">' + formatDuration(r.duration) + ' &middot; ' + formatHistoryDate(r.date) + '</span>' +
+        '</div>' +
+      '</div>';
+    }).join("");
+  }
+  function openHistory(){ buildHistoryPanel(); document.getElementById("historyOverlay").hidden = false; }
+  function closeHistory(){ document.getElementById("historyOverlay").hidden = true; }
+  document.getElementById("historyBtn").addEventListener("click", openHistory);
+  document.getElementById("historyClose").addEventListener("click", closeHistory);
+  document.getElementById("historyOverlay").addEventListener("click", function(e){
+    if (e.target.id === "historyOverlay") closeHistory();
+  });
+  document.getElementById("historyClearBtn").addEventListener("click", function(){
+    runHistory = [];
+    persistHistory();
+    buildHistoryPanel();
+  });
+
   // ---------- toast ----------
   var toastEl = document.getElementById("toast");
   var toastTimer = null;
@@ -557,9 +627,21 @@
       bonusTimer: 6 + Math.random()*6,
       shakeTime: 0, shakeMag: 0,
       elapsed: 0, pressureMaxWarned: false,
+      shieldTime: 0,
+      bestHandLabel: null, bestHandScore: 0,
       gameOver: false
     };
   }
+
+  // Clear Shield: clearing any hand grants a short window where a card
+  // sitting above the danger line does NOT accumulate danger-timer at all —
+  // a reward for the moment of skill, deliberately narrow (short duration,
+  // only triggered by an actual clear) so it can't be chained into global
+  // invulnerability the way relieving *pressure* itself could (see
+  // conversation: pressure is intentionally not skill-responsive, since
+  // skilled/spam play being able to suppress it indefinitely is the exact
+  // "can't lose" failure mode this session spent most of its effort on).
+  var SHIELD_DURATION = 1.0;
 
   // ---------- difficulty escalation ----------
   // Nothing about the base drop flow scales with time, so a player who
@@ -692,6 +774,8 @@
       var jokerBonus = hasJoker ? JOKER_BONUS : 0;
       var gained = Math.round((hand.score + rankBonus) * currentMult()) + jokerBonus;
       state.score += gained;
+      state.shieldTime = SHIELD_DURATION;
+      if (hand.score > state.bestHandScore){ state.bestHandScore = hand.score; state.bestHandLabel = hand.label; }
 
       spawnParticles(cx, cy, "rgb(" + hand.color.join(",") + ")", 10 + members.length*4);
       spawnPopup(cx, cy, (hasJoker ? "🃏 " : "") + hand.label + "  +" + gained, "rgb(" + hand.color.join(",") + ")");
@@ -772,8 +856,12 @@
       var bb = state.balls[k];
       if (bb.y - bb.r < state.dangerY) { overLine = true; break; }
     }
-    if (overLine) state.dangerTimer += dt;
+    // Clear Shield: while active, a card over the line does not accumulate
+    // danger-timer at all (it still decays normally) — the reward for
+    // having just cleared a hand, not a reduction of the underlying threat.
+    if (overLine && state.shieldTime <= 0) state.dangerTimer += dt;
     else state.dangerTimer = Math.max(0, state.dangerTimer - dt*2);
+    if (state.shieldTime > 0) state.shieldTime = Math.max(0, state.shieldTime - dt);
     var graceThreshold = 1.15 - pT*0.35;
     if (state.dangerTimer > graceThreshold) triggerGameOver();
 
@@ -809,6 +897,14 @@
     state.bonusActive = false;
     document.getElementById("bonusPanel").hidden = true;
     if (state.score > saved.best){ saved.best = state.score; persistBest(); }
+    runHistory.unshift({
+      score: Math.round(state.score),
+      bestHand: state.bestHandLabel,
+      duration: Math.round(state.elapsed),
+      date: Date.now()
+    });
+    if (runHistory.length > HISTORY_MAX) runHistory.length = HISTORY_MAX;
+    persistHistory();
     sfxGameOver();
     document.getElementById("finalScore").textContent = Math.round(state.score).toLocaleString();
     document.getElementById("recordLine").textContent = (state.score >= saved.best) ? "New best!" : ("Best " + Math.round(saved.best).toLocaleString());
@@ -965,11 +1061,25 @@
     ctx.lineTo(state.wallRight, state.floorY); ctx.lineTo(state.wallRight, state.dangerY-10);
     ctx.stroke();
 
-    var dangerAlpha = 0.35 + (state.dangerTimer>0 ? Math.min(0.5, state.dangerTimer*0.4) : 0);
-    ctx.strokeStyle = "rgba(239,77,94," + dangerAlpha + ")";
-    ctx.setLineDash([6,6]);
-    ctx.beginPath(); ctx.moveTo(state.wallLeft, state.dangerY); ctx.lineTo(state.wallRight, state.dangerY); ctx.stroke();
-    ctx.setLineDash([]);
+    if (state.shieldTime > 0){
+      // Clear Shield glow: the line reads teal instead of danger-red while
+      // active, fading out over its last ~0.4s so the transition back to
+      // normal isn't a hard cut.
+      var shieldAlpha = 0.55 + Math.min(0.35, state.shieldTime * 0.35);
+      ctx.save();
+      ctx.shadowColor = "rgba(62,207,142,0.8)";
+      ctx.shadowBlur = 10;
+      ctx.strokeStyle = "rgba(62,207,142," + shieldAlpha + ")";
+      ctx.lineWidth = 2.4;
+      ctx.beginPath(); ctx.moveTo(state.wallLeft, state.dangerY); ctx.lineTo(state.wallRight, state.dangerY); ctx.stroke();
+      ctx.restore();
+    } else {
+      var dangerAlpha = 0.35 + (state.dangerTimer>0 ? Math.min(0.5, state.dangerTimer*0.4) : 0);
+      ctx.strokeStyle = "rgba(239,77,94," + dangerAlpha + ")";
+      ctx.setLineDash([6,6]);
+      ctx.beginPath(); ctx.moveTo(state.wallLeft, state.dangerY); ctx.lineTo(state.wallRight, state.dangerY); ctx.stroke();
+      ctx.setLineDash([]);
+    }
 
     state.balls.forEach(drawCard);
 
