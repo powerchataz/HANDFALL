@@ -63,6 +63,12 @@
   .new-game:hover{border-color:var(--amber); color:var(--amber);}
   .new-game:focus-visible{outline:2px solid var(--amber); outline-offset:2px;}
 
+  .pressure-wrap{ display:flex; flex-direction:column; gap:4px; }
+  .pressure-label{ display:flex; justify-content:space-between; font-family:'Space Mono',monospace; font-size:9.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-faint); }
+  .pressure-track{ height:5px; border-radius:999px; background:var(--bg-1); border:1px solid var(--felt-edge); overflow:hidden; }
+  .pressure-fill{ height:100%; width:0%; background:linear-gradient(90deg,var(--amber),var(--danger)); transition:width .4s linear; }
+  @media (prefers-reduced-motion: reduce){ .pressure-fill{ transition:none; } }
+
   .hud{ display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
   .chip{ background:linear-gradient(160deg,var(--felt),var(--bg-1)); border:1px solid var(--felt-edge); border-radius:10px; padding:9px 12px; }
   .chip .label{ font-size:10px; letter-spacing:0.09em; text-transform:uppercase; color:var(--ink-faint); margin-bottom:3px; }
@@ -197,6 +203,11 @@
     <div class="chip"><div class="label">Score</div><div class="value" id="scoreVal">0</div></div>
     <div class="chip best"><div class="label">Best</div><div class="value" id="bestVal">0</div></div>
     <div class="chip mult"><div class="label">Combo</div><div class="value" id="multVal">&times;1.0</div></div>
+  </div>
+
+  <div class="pressure-wrap">
+    <div class="pressure-label"><span>Pressure</span><span id="pressurePct">0%</span></div>
+    <div class="pressure-track"><div class="pressure-fill" id="pressureFill"></div></div>
   </div>
 
   <div class="table-wrap">
@@ -526,9 +537,21 @@
       bonusActive: false, bonusChoices: [], bonusTimeLeft: 0,
       bonusTimer: 6 + Math.random()*6,
       shakeTime: 0, shakeMag: 0,
+      elapsed: 0, pressureMaxWarned: false,
       gameOver: false
     };
   }
+
+  // ---------- difficulty escalation ----------
+  // Nothing about the base drop flow scales with time, so a player who
+  // matches roughly as fast as cards land can otherwise stall forever with
+  // pressure never rising. This ramps three things together over the first
+  // 4 minutes of a run: gravity speeds up, the grace period before a
+  // lingering card ends the run shrinks, and the danger line itself creeps
+  // down, shrinking the usable stack height — all visible, none hidden.
+  var PRESSURE_RAMP_SECONDS = 240;
+  var DANGER_Y_BASE = 90;
+  function pressureT(){ return Math.min(1, state.elapsed / PRESSURE_RAMP_SECONDS); }
 
   function currentMult(){ return (1 + state.cascadeMult) * legacyMultiplier(); }
 
@@ -648,7 +671,12 @@
 
   // ---------- physics ----------
   function stepPhysics(dt){
-    var balls = state.balls, g = GRAVITY;
+    state.elapsed += dt;
+    var pT = pressureT();
+    state.dangerY = DANGER_Y_BASE + pT*20;
+    if (pT >= 1 && !state.pressureMaxWarned){ state.pressureMaxWarned = true; showToast("Pressure maxed — the felt won't get any smaller"); }
+
+    var balls = state.balls, g = GRAVITY * (1 + pT*0.35);
     for (var i=0;i<balls.length;i++){
       var b = balls[i];
       b.vy += g*dt; b.x += b.vx*dt; b.y += b.vy*dt; b.rot += b.angv*dt + b.vx*dt*0.01;
@@ -685,7 +713,8 @@
       }
     }
     if (overLine) state.dangerTimer += dt; else state.dangerTimer = 0;
-    if (state.dangerTimer > 1.15) triggerGameOver();
+    var graceThreshold = 1.15 - pT*0.35;
+    if (state.dangerTimer > graceThreshold) triggerGameOver();
 
     for (var pi=state.particles.length-1; pi>=0; pi--){
       var pt = state.particles[pi];
@@ -937,6 +966,14 @@
     document.getElementById("multVal").textContent = "×" + currentMult().toFixed(1);
   }
 
+  function updatePressureBar(){
+    var pct = Math.round(pressureT()*100);
+    var fill = document.getElementById("pressureFill");
+    var label = document.getElementById("pressurePct");
+    if (fill) fill.style.width = pct + "%";
+    if (label) label.textContent = pct + "%";
+  }
+
   function resize(){
     var rect = canvas.getBoundingClientRect();
     var dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -959,6 +996,7 @@
       while (accumulator >= FIXED_DT && steps < 6){ stepPhysics(FIXED_DT); accumulator -= FIXED_DT; steps++; }
     }
     draw();
+    updatePressureBar();
     requestAnimationFrame(loop);
   }
 
