@@ -393,15 +393,21 @@
     cards.forEach(function(c){ rankCounts[c.rank] = (rankCounts[c.rank]||0)+1; });
     var counts = Object.keys(rankCounts).map(function(k){return rankCounts[k];}).sort(function(a,b){return b-a;});
 
-    // The base 2-card case is a literal match: same number AND same symbol,
-    // not just the same rank. Tried loosening this to rank-only once
-    // (measured 2026: it raised spam-survival score from 3,683 to 6,496 in
-    // a 6-minute stress run — rank-only pairing is too cheap given only 13
-    // ranks, it just moved the "too easy" problem from n===5 to n===2). Real
-    // poker "Pair" logic still applies inside 3-5 card hands, but only where
-    // it isn't the *sole* justification for clearing an oversized cluster
-    // (see the n===5 fallback removal below).
-    if (n === 2) return (cards[0].rank===cards[1].rank && cards[0].suit===cards[1].suit) ? mk("Match") : null;
+    // Exact rank+suit is a "Match"; same rank, different suit is "Pair" —
+    // both advertised in the Hand Guide, so both must actually be reachable.
+    // Rank-only Pair was tried and reverted once before (it raised
+    // spam-survival score 3,683 -> 6,496 in an earlier stress run, back
+    // when hardMode only kicked in at max heat and nothing capped evaluated
+    // group size). Restoring it now that hardMode starts suppressing
+    // rank-dupe supply at spamHeat>=1.3 AND resolveHands caps evaluated
+    // group size under heat — re-verified against the same stress
+    // scenarios (wide bot-speed spam, realistic human pace, single-column)
+    // before landing this, see conversation log.
+    if (n === 2){
+      if (cards[0].rank===cards[1].rank && cards[0].suit===cards[1].suit) return mk("Match");
+      if (cards[0].rank===cards[1].rank) return mk("Pair");
+      return null;
+    }
     if (n === 3) return counts[0]===3 ? mk("Three of a Kind") : null;
     if (n === 4){
       if (counts[0]===4) return mk("Four of a Kind");
