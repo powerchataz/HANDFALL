@@ -1,0 +1,975 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Handfall</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700;800&family=Manrope:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg-0:#100e17;
+    --bg-1:#1b1826;
+    --felt:#22192b;
+    --felt-edge:#382a44;
+    --ink:#f3ece1;
+    --ink-dim:#b4a8c2;
+    --ink-faint:#7a6f8c;
+    --amber:#f0a63a;
+    --magenta:#e0518c;
+    --teal:#3ecf8e;
+    --danger:#ef4d5e;
+    --card-face:#f2ecdf;
+    --card-ink:#241a2e;
+    --card-red:#c9425c;
+    --gold-line: color-mix(in srgb, var(--amber) 60%, transparent);
+  }
+
+  *{box-sizing:border-box;}
+  html,body{margin:0;height:100%;}
+  body{
+    background:
+      radial-gradient(1100px 700px at 50% -10%, #2a2038 0%, transparent 60%),
+      radial-gradient(900px 600px at 90% 110%, #1a2a2c 0%, transparent 55%),
+      var(--bg-0);
+    color:var(--ink);
+    font-family:'Manrope',system-ui,sans-serif;
+    display:flex;
+    justify-content:center;
+    padding:28px 16px 40px;
+    -webkit-font-smoothing:antialiased;
+  }
+
+  .app{ width:100%; max-width:460px; display:flex; flex-direction:column; gap:16px; }
+
+  header{ display:flex; align-items:flex-end; justify-content:space-between; gap:12px; }
+  .title-block h1{
+    font-family:'Unbounded',sans-serif;
+    font-weight:800;
+    font-size:clamp(24px,6vw,30px);
+    letter-spacing:0.01em;
+    margin:0 0 4px;
+    text-wrap:balance;
+    background:linear-gradient(90deg,var(--amber),var(--magenta) 55%,var(--teal));
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+  }
+  .title-block p{ margin:0; font-size:12.5px; color:var(--ink-dim); letter-spacing:0.03em; }
+  .new-game{
+    flex:0 0 auto; background:transparent; border:1px solid var(--felt-edge); color:var(--ink-dim);
+    font-family:'Space Mono',monospace; font-size:11.5px; letter-spacing:0.06em; text-transform:uppercase;
+    padding:9px 12px; border-radius:8px; cursor:pointer; transition:border-color .15s, color .15s;
+  }
+  .new-game:hover{border-color:var(--amber); color:var(--amber);}
+  .new-game:focus-visible{outline:2px solid var(--amber); outline-offset:2px;}
+
+  .hud{ display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+  .chip{ background:linear-gradient(160deg,var(--felt),var(--bg-1)); border:1px solid var(--felt-edge); border-radius:10px; padding:9px 12px; }
+  .chip .label{ font-size:10px; letter-spacing:0.09em; text-transform:uppercase; color:var(--ink-faint); margin-bottom:3px; }
+  .chip .value{ font-family:'Space Mono',monospace; font-variant-numeric:tabular-nums; font-weight:700; font-size:19px; color:var(--ink); }
+  .chip.best .value{color:var(--amber);}
+  .chip.mult .value{color:var(--magenta);}
+
+  .table-wrap{
+    position:relative; border-radius:20px; padding:10px;
+    background:linear-gradient(160deg,#2c2138,#171220);
+    border:1px solid var(--felt-edge);
+    box-shadow:0 30px 60px -30px rgba(0,0,0,.7), inset 0 1px 0 rgba(255,255,255,.03);
+  }
+  .table-wrap::before{
+    content:""; position:absolute; inset:10px; border-radius:14px;
+    border:1px dashed color-mix(in srgb, var(--amber) 22%, transparent); pointer-events:none;
+  }
+  canvas#game{
+    display:block; width:100%; aspect-ratio:340/560; border-radius:14px;
+    background:radial-gradient(120% 90% at 50% 0%,#241a30 0%,#140f1c 70%);
+    touch-action:none; cursor:crosshair;
+  }
+
+  .hint{ text-align:center; font-size:11.5px; color:var(--ink-faint); letter-spacing:0.02em; line-height:1.5; }
+  .hint b{color:var(--ink-dim); font-weight:600;}
+
+  .guide-toggle{
+    display:flex; align-items:center; justify-content:center; gap:7px;
+    width:100%; background:var(--bg-1); border:1px solid var(--felt-edge); color:var(--ink-dim);
+    font-family:'Space Mono',monospace; font-size:11.5px; letter-spacing:0.04em;
+    padding:10px; border-radius:10px; cursor:pointer; transition:border-color .15s, color .15s;
+  }
+  .guide-toggle:hover{ border-color:var(--amber); color:var(--amber); }
+  .guide-toggle:focus-visible{ outline:2px solid var(--amber); outline-offset:2px; }
+  .guide-toggle .ic{ font-size:14px; }
+
+  .modal.wide{ max-width:440px; max-height:min(80vh,640px); overflow-y:auto; }
+  .close-x{
+    position:absolute; top:14px; right:14px; background:none; border:none; color:var(--ink-faint);
+    font-size:18px; line-height:1; cursor:pointer; padding:4px;
+  }
+  .close-x:hover{ color:var(--ink); }
+  .close-x:focus-visible{ outline:2px solid var(--amber); outline-offset:2px; }
+
+  .hand-row{ display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 0; border-bottom:1px solid var(--felt-edge); }
+  .hand-row:last-child{ border-bottom:none; }
+  .hand-cards{ display:flex; gap:3px; flex:0 0 auto; }
+  .hand-info{ display:flex; flex-direction:column; gap:2px; min-width:0; }
+  .hand-info .hn{ font-family:'Unbounded',sans-serif; font-weight:700; font-size:12.5px; }
+  .hand-info .hp{ font-family:'Space Mono',monospace; font-size:10.5px; color:var(--amber); }
+
+  .mini-card{
+    width:26px; height:36px; border-radius:5px; flex:0 0 auto;
+    background:linear-gradient(160deg,#fbf7ee,#e9e0cd);
+    border:1px solid rgba(36,26,46,0.45);
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    font-family:'Space Mono',monospace; font-weight:700; line-height:1;
+  }
+  .mini-card .r{ font-size:10px; }
+  .mini-card .s{ font-size:10px; margin-top:1px; }
+
+  .bonus-panel{
+    display:flex; flex-direction:column; align-items:center; gap:8px;
+    background:linear-gradient(160deg,var(--felt),var(--bg-1)); border:1px solid var(--amber);
+    border-radius:12px; padding:12px; box-shadow:0 0 0 1px rgba(240,166,58,.15), 0 14px 28px -16px rgba(0,0,0,.6);
+  }
+  .bonus-panel[hidden]{ display:none; }
+  .bonus-title{ font-family:'Unbounded',sans-serif; font-weight:700; font-size:12px; color:var(--amber); letter-spacing:.02em; }
+  .bonus-sub{ font-family:'Space Mono',monospace; font-size:10.5px; color:var(--ink-dim); }
+  .bonus-cards{ display:flex; justify-content:center; gap:9px; }
+  .hand-card{
+    width:50px; height:68px; border-radius:8px; flex:0 0 auto; cursor:pointer;
+    background:linear-gradient(160deg,#fbf7ee,#e9e0cd); border:2px solid transparent;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    font-family:'Space Mono',monospace; font-weight:700; line-height:1.1;
+    box-shadow:0 8px 16px -10px rgba(0,0,0,.6);
+    transition:transform .12s ease, box-shadow .12s ease;
+  }
+  .hand-card .r{ font-size:19px; }
+  .hand-card .s{ font-size:17px; margin-top:3px; }
+  .hand-card:hover{ transform:translateY(-3px); }
+  .hand-card:focus-visible{ outline:2px solid var(--amber); outline-offset:2px; }
+  .hand-card.joker{
+    background:linear-gradient(160deg,#fff3d6,#f0a63a 55%,#e0518c); font-size:24px;
+    display:flex; align-items:center; justify-content:center;
+  }
+  @media (prefers-reduced-motion: reduce){ .hand-card{ transition:none; } }
+
+  .achv-row{ display:flex; align-items:center; gap:11px; padding:10px 0; border-bottom:1px solid var(--felt-edge); }
+  .achv-row:last-child{ border-bottom:none; }
+  .achv-row .ico{ font-size:18px; flex:0 0 auto; width:26px; text-align:center; }
+  .achv-row.locked .ico{ opacity:0.4; }
+  .achv-row .an{ font-family:'Unbounded',sans-serif; font-weight:700; font-size:12.5px; }
+  .achv-row.locked .an{ color:var(--ink-faint); }
+  .achv-row .ad{ font-size:11.5px; color:var(--ink-dim); margin-top:2px; }
+  .achv-row.locked .ad{ color:var(--ink-faint); }
+
+  .overlay{ position:fixed; inset:0; background:rgba(9,7,13,.72); backdrop-filter:blur(3px); display:flex; align-items:center; justify-content:center; padding:20px; z-index:10; }
+  .overlay[hidden]{display:none;}
+  .modal{ width:100%; max-width:420px; background:linear-gradient(165deg,#251d31,#150f1c); border:1px solid var(--felt-edge); border-radius:18px; padding:22px 20px 20px; box-shadow:0 40px 80px -30px rgba(0,0,0,.8); }
+  .modal h2{ font-family:'Unbounded',sans-serif; font-size:19px; margin:0 0 4px; text-wrap:balance; }
+  .modal .sub{ font-size:12.5px; color:var(--ink-dim); margin:0 0 18px; }
+  .score-row{ display:flex; align-items:baseline; justify-content:space-between; background:var(--bg-1); border:1px solid var(--felt-edge); border-radius:12px; padding:14px 16px; margin-bottom:16px; }
+  .score-row .big{ font-family:'Space Mono',monospace; font-weight:700; font-size:30px; color:var(--amber); font-variant-numeric:tabular-nums; }
+  .score-row .rec{ font-size:11px; color:var(--teal); font-family:'Space Mono',monospace; letter-spacing:.04em; }
+  .modal .go{ width:100%; background:linear-gradient(90deg,var(--amber),var(--magenta)); border:none; color:#1a1220; font-family:'Unbounded',sans-serif; font-weight:700; font-size:14px; padding:13px; border-radius:10px; cursor:pointer; }
+  .modal .go:focus-visible{ outline:2px solid var(--ink); outline-offset:2px; }
+
+  .toast{
+    position:absolute; top:8px; left:50%; transform:translate(-50%,-8px);
+    background:rgba(20,15,28,.94); border:1px solid var(--gold-line); color:var(--amber);
+    font-family:'Space Mono',monospace; font-size:11px; letter-spacing:.03em; padding:6px 12px;
+    border-radius:999px; opacity:0; transition:opacity .25s ease, transform .25s ease; pointer-events:none; white-space:nowrap;
+  }
+  .toast.show{opacity:1; transform:translate(-50%,0);}
+
+  @media (prefers-reduced-motion: reduce){ .toast{transition:none;} }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <header>
+    <div class="title-block">
+      <h1>Handfall</h1>
+      <p>drop cards &middot; connect a poker hand &middot; clear it before the felt overflows</p>
+    </div>
+    <button class="new-game" id="newGameBtn" type="button">New Game</button>
+  </header>
+
+  <div class="hud">
+    <div class="chip"><div class="label">Score</div><div class="value" id="scoreVal">0</div></div>
+    <div class="chip best"><div class="label">Best</div><div class="value" id="bestVal">0</div></div>
+    <div class="chip mult"><div class="label">Combo</div><div class="value" id="multVal">&times;1.0</div></div>
+  </div>
+
+  <div class="table-wrap">
+    <canvas id="game" width="340" height="560" role="img" aria-label="Handfall play field"></canvas>
+    <div class="toast" id="toast"></div>
+  </div>
+
+  <div class="bonus-panel" id="bonusPanel" hidden aria-label="Bonus draw — pick a card before time runs out">
+    <div class="bonus-title">✨ Bonus Draw</div>
+    <div class="bonus-cards" id="bonusCards"></div>
+    <div class="bonus-sub" id="bonusCountdown">Pick one&hellip;</div>
+  </div>
+
+  <p class="hint"><b>Move</b> to aim &middot; <b>tap / click</b> to drop &middot; any 2&ndash;5 touching cards that form a poker hand clear together &mdash; that's your only real relief from overflow. Stay calm and a Bonus Draw will occasionally appear above.</p>
+
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+    <button class="guide-toggle" id="guideBtn" type="button"><span class="ic">🂡</span> Hand guide</button>
+    <button class="guide-toggle" id="achvBtn" type="button"><span class="ic">🏆</span> Achievements</button>
+  </div>
+</div>
+
+<div class="overlay" id="guideOverlay" hidden>
+  <div class="modal wide" role="dialog" aria-modal="true" aria-labelledby="guideTitle" style="position:relative;">
+    <button class="close-x" id="guideClose" type="button" aria-label="Close hand guide">&times;</button>
+    <h2 id="guideTitle">Hand Guide</h2>
+    <p class="sub">Any 2&ndash;5 touching cards that match one of these clear together. Higher cards in the match pay a bonus on top of the base points shown. Watch for the 🃏 Joker &mdash; it's wild, and clearing it pays a big secret bonus.</p>
+    <div id="handGuideList"></div>
+  </div>
+</div>
+
+<div class="overlay" id="achvOverlay" hidden>
+  <div class="modal wide" role="dialog" aria-modal="true" aria-labelledby="achvTitle" style="position:relative;">
+    <button class="close-x" id="achvClose" type="button" aria-label="Close achievements">&times;</button>
+    <h2 id="achvTitle">Achievements</h2>
+    <p class="sub" id="achvSummary">Loading&hellip;</p>
+    <div id="achvList"></div>
+  </div>
+</div>
+
+<div class="overlay" id="gameOverOverlay" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="goTitle">
+    <h2 id="goTitle">The Felt's Full</h2>
+    <p class="sub">A card stayed above the line too long. Here's how the run shook out.</p>
+    <div class="score-row">
+      <div>
+        <div style="font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-faint);margin-bottom:3px;">Final score</div>
+        <div class="big" id="finalScore">0</div>
+      </div>
+      <div class="rec" id="recordLine">Best 0</div>
+    </div>
+    <button class="go" id="restartBtn" type="button">Deal Again</button>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  // ---------- persistence ----------
+  var SAVE_KEY = "handfall_save_v1";
+  var ACHV_KEY = "handfall_achv_v1";
+  var saved = { best: 0 };
+  var unlockedAchv = {};
+  try {
+    var raw = localStorage.getItem(SAVE_KEY);
+    if (raw) { var parsed = JSON.parse(raw); if (parsed && typeof parsed.best === "number") saved.best = parsed.best; }
+  } catch (e) {}
+  try {
+    var rawA = localStorage.getItem(ACHV_KEY);
+    if (rawA) unlockedAchv = JSON.parse(rawA) || {};
+  } catch (e) {}
+  function persistBest(){ try { localStorage.setItem(SAVE_KEY, JSON.stringify({ best: saved.best })); } catch (e) {} }
+  function persistAchv(){ try { localStorage.setItem(ACHV_KEY, JSON.stringify(unlockedAchv)); } catch (e) {} }
+
+  // ---------- audio ----------
+  var actx = null;
+  function ensureAudio(){
+    if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { actx = null; } }
+    else if (actx.state === "suspended") actx.resume();
+  }
+  function tone(freq, dur, opts){
+    if (!actx) return;
+    opts = opts || {};
+    var type = opts.type || "sine";
+    var gainAmt = opts.gain != null ? opts.gain : 0.18;
+    var slideTo = opts.slideTo || null;
+    var delay = opts.delay || 0;
+    var t0 = actx.currentTime + delay;
+    var osc = actx.createOscillator(); var gain = actx.createGain();
+    osc.type = type; osc.frequency.setValueAtTime(freq, t0);
+    if (slideTo) osc.frequency.exponentialRampToValueAtTime(Math.max(20, slideTo), t0 + dur);
+    gain.gain.setValueAtTime(0.0001, t0);
+    gain.gain.exponentialRampToValueAtTime(gainAmt, t0 + Math.min(0.02, dur * 0.3));
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    osc.connect(gain).connect(actx.destination);
+    osc.start(t0); osc.stop(t0 + dur + 0.02);
+  }
+  function sfxDrop(){ tone(220, 0.08, { type: "triangle", gain: 0.12 }); }
+  function sfxClear(rank){
+    var f = 260 + rank * 30;
+    tone(f, 0.18, { type: "sine", gain: 0.22, slideTo: f * 1.7 });
+  }
+  function sfxBig(){
+    tone(200, 0.45, { type: "sawtooth", gain: 0.15, slideTo: 900 });
+    tone(400, 0.45, { type: "sine", gain: 0.12, slideTo: 1300, delay: 0.05 });
+  }
+  function sfxAchv(){ [0,1,2].forEach(function(i){ tone(360 + i*140, 0.13, { type:"square", gain:0.09, delay:i*0.06 }); }); }
+  function sfxGameOver(){ tone(300, 0.6, { type: "sawtooth", gain: 0.16, slideTo: 60 }); }
+
+  // ---------- cards ----------
+  var RANKS = ["2","3","4","5","6","7","8","9","10","J","Q","K","A"];
+  var SUITS = ["♠","♥","♦","♣"]; // spade heart diamond club
+  var SUIT_RED = [false, true, true, false];
+  var CARD_R = 20;
+  var MAX_BALLS = 40;
+
+  var JOKER_CHANCE = 0.04;
+  var JOKER_BONUS = 150;
+  // The faster the player spams drops, the more "spam heat" builds. At high
+  // heat the generator actively avoids handing out any rank+suit combo that
+  // already exists ANYWHERE on the current board (not just recent drops) —
+  // this is what actually matters, since a match only needs a duplicate of
+  // *something already on the table*, however long ago it landed. Starving
+  // that supply during spam is what forces the pile to actually grow instead
+  // of self-clearing indefinitely. Jokers are cut off entirely at max heat.
+  function randomCard(spamHeat, boardCards){
+    spamHeat = spamHeat || 0;
+    boardCards = boardCards || [];
+    var jokerChance = spamHeat >= 2 ? 0 : JOKER_CHANCE * Math.max(0.1, 1 - spamHeat/2);
+    if (Math.random() < jokerChance) return { rank:-1, suit:-1, joker:true };
+    var attempts = spamHeat > 2 ? 14 : (spamHeat > 1 ? 7 : 1);
+    var hardMode = spamHeat >= 2; // at max heat, also starve same-rank supply (blocks Trips/Quads/Flush farming, not just exact Match)
+    var card;
+    for (var i=0;i<attempts;i++){
+      card = { rank: Math.floor(Math.random()*13), suit: Math.floor(Math.random()*4), joker:false };
+      var exactDupe = boardCards.some(function(c){ return c.rank===card.rank && c.suit===card.suit; });
+      var rankDupe = hardMode && boardCards.some(function(c){ return c.rank===card.rank; });
+      if (!exactDupe && !rankDupe) break;
+    }
+    return card;
+  }
+
+  // hand evaluation: cards = [{rank,suit}], size 2-5
+  var HAND_SCORE = {
+    "Match":12, "High Card":5, "Pair":10, "Two Pair":25, "Three of a Kind":35,
+    "Straight":60, "Flush":70, "Full House":90, "Four of a Kind":140,
+    "Straight Flush":250, "Royal Flush":500
+  };
+  var HAND_COLOR = {
+    "Match":[62,207,142], "High Card":[122,111,140], "Pair":[62,207,142], "Two Pair":[62,207,142],
+    "Three of a Kind":[240,166,58], "Straight":[240,166,58], "Flush":[224,81,140],
+    "Full House":[224,81,140], "Four of a Kind":[239,77,94],
+    "Straight Flush":[255,224,140], "Royal Flush":[255,224,140]
+  };
+
+  // A Joker is wild: it stands in for whichever rank/suit best completes a
+  // hand from the other touching cards before evaluation runs.
+  function resolveWilds(cards){
+    if (!cards.some(function(c){return c.joker;})) return cards;
+    var nonJoker = cards.filter(function(c){return !c.joker;});
+    if (!nonJoker.length) return cards.map(function(){return {rank:0,suit:0};});
+    var rankFreq = {}, suitFreq = {};
+    nonJoker.forEach(function(c){ rankFreq[c.rank]=(rankFreq[c.rank]||0)+1; suitFreq[c.suit]=(suitFreq[c.suit]||0)+1; });
+    var fillRank = Number(Object.keys(rankFreq).sort(function(a,b){return rankFreq[b]-rankFreq[a];})[0]);
+    var fillSuit = Number(Object.keys(suitFreq).sort(function(a,b){return suitFreq[b]-suitFreq[a];})[0]);
+    return cards.map(function(c){ return c.joker ? {rank:fillRank, suit:fillSuit} : c; });
+  }
+
+  function evaluateHand(rawCards){
+    var cards = resolveWilds(rawCards);
+    var n = cards.length;
+    var rankCounts = {};
+    cards.forEach(function(c){ rankCounts[c.rank] = (rankCounts[c.rank]||0)+1; });
+    var counts = Object.keys(rankCounts).map(function(k){return rankCounts[k];}).sort(function(a,b){return b-a;});
+
+    // The base 2-card case is a literal match: same number AND same symbol,
+    // not just the same rank — this is what keeps random spam-drops from
+    // pairing up constantly (real poker "Pair" logic still applies inside
+    // 3-5 card hands below).
+    if (n === 2) return (cards[0].rank===cards[1].rank && cards[0].suit===cards[1].suit) ? mk("Match") : null;
+    if (n === 3) return counts[0]===3 ? mk("Three of a Kind") : null;
+    if (n === 4){
+      if (counts[0]===4) return mk("Four of a Kind");
+      if (counts[0]===2 && counts[1]===2) return mk("Two Pair");
+      return null;
+    }
+    // n === 5
+    var suits = cards.map(function(c){return c.suit;});
+    var isFlush = suits.every(function(s){return s===suits[0];});
+    var values = cards.map(function(c){return c.rank+2;}).sort(function(a,b){return a-b;});
+    var uniqueVals = values.filter(function(v,i){return values.indexOf(v)===i;});
+    var isWheel = uniqueVals.length===5 && uniqueVals.join(",") === "2,3,4,5,14";
+    var isStraight = (uniqueVals.length===5 && (uniqueVals[4]-uniqueVals[0]===4)) || isWheel;
+
+    if (isStraight && isFlush){
+      var royal = uniqueVals.join(",") === "10,11,12,13,14";
+      return mk(royal ? "Royal Flush" : "Straight Flush");
+    }
+    if (counts[0]===4) return mk("Four of a Kind");
+    if (counts[0]===3 && counts[1]===2) return mk("Full House");
+    if (isFlush) return mk("Flush");
+    if (isStraight) return mk("Straight");
+    if (counts[0]===3) return mk("Three of a Kind");
+    if (counts[0]===2 && counts[1]===2) return mk("Two Pair");
+    if (counts[0]===2) return mk("Pair");
+    return mk("High Card");
+
+    function mk(label){ return { label: label, score: HAND_SCORE[label], color: HAND_COLOR[label] }; }
+  }
+
+  // ---------- achievements ----------
+  var ACHIEVEMENTS = [
+    { id:"first_match", name:"First Contact", desc:"Clear your first exact duplicate match.", test:function(ctx){ return ctx.label==="Match"; } },
+    { id:"first_straight", name:"Straight Shooter", desc:"Clear a Straight.", test:function(ctx){ return ctx.label==="Straight"; } },
+    { id:"first_flush", name:"Flush With Luck", desc:"Clear a Flush.", test:function(ctx){ return ctx.label==="Flush"; } },
+    { id:"full_house", name:"House Call", desc:"Clear a Full House.", test:function(ctx){ return ctx.label==="Full House"; } },
+    { id:"four_kind", name:"Quad Damage", desc:"Clear Four of a Kind.", test:function(ctx){ return ctx.label==="Four of a Kind"; } },
+    { id:"straight_flush", name:"Dead Man's Draw", desc:"Clear a Straight Flush.", test:function(ctx){ return ctx.label==="Straight Flush"; } },
+    { id:"pressure_valve", name:"Pressure Valve", desc:"Clear a hand while a card was touching the danger line.", test:function(ctx){ return ctx.nearDanger; } },
+    { id:"chain3", name:"Clean Sweep", desc:"Clear 3 hands in one uninterrupted chain.", test:function(ctx){ return ctx.chainCount>=3; } },
+    { id:"joker_found", name:"Wild Draw", desc:"Clear a hand that included the Joker.", test:function(ctx){ return ctx.hasJoker; } },
+    { id:"high_roller", name:"High Roller", desc:"Clear a hand averaging Kings or better.", test:function(ctx){ return ctx.avgValue>=13; } },
+    { id:"century", name:"Century", desc:"Reach a score of 1,000 in a single run.", test:function(ctx){ return ctx.score>=1000; } },
+    { id:"oracle", name:"Oracle", desc:"Clear a Royal Flush. Reward: permanently reveals the card after next, in every future run.", test:function(ctx){ return ctx.label==="Royal Flush"; } }
+  ];
+  function unlockedCount(){ return ACHIEVEMENTS.filter(function(a){return unlockedAchv[a.id];}).length; }
+  function legacyMultiplier(){ return 1 + unlockedCount()*0.02; }
+  function checkAchievements(evalCtx){
+    ACHIEVEMENTS.forEach(function(a){
+      if (!unlockedAchv[a.id] && a.test(evalCtx)){
+        unlockedAchv[a.id] = true;
+        persistAchv();
+        showToast("Achievement — " + a.name);
+        sfxAchv();
+        if (typeof buildAchievementsPanel === "function") buildAchievementsPanel();
+      }
+    });
+  }
+
+  // ---------- hand guide ----------
+  var GUIDE_HANDS = [
+    { label:"Pair", base:10, cards:[{rank:7,suit:1},{rank:7,suit:3}] },
+    { label:"Two Pair", base:25, cards:[{rank:4,suit:0},{rank:4,suit:2},{rank:9,suit:1},{rank:9,suit:3}] },
+    { label:"Three of a Kind", base:35, cards:[{rank:11,suit:0},{rank:11,suit:1},{rank:11,suit:2}] },
+    { label:"Straight", base:60, cards:[{rank:2,suit:0},{rank:3,suit:1},{rank:4,suit:2},{rank:5,suit:3},{rank:6,suit:0}] },
+    { label:"Flush", base:70, cards:[{rank:1,suit:1},{rank:4,suit:1},{rank:6,suit:1},{rank:9,suit:1},{rank:12,suit:1}] },
+    { label:"Full House", base:90, cards:[{rank:10,suit:0},{rank:10,suit:1},{rank:10,suit:2},{rank:3,suit:3},{rank:3,suit:0}] },
+    { label:"Four of a Kind", base:140, cards:[{rank:5,suit:0},{rank:5,suit:1},{rank:5,suit:2},{rank:5,suit:3}] },
+    { label:"Straight Flush", base:250, cards:[{rank:3,suit:2},{rank:4,suit:2},{rank:5,suit:2},{rank:6,suit:2},{rank:7,suit:2}] },
+    { label:"Royal Flush", base:500, cards:[{rank:8,suit:0},{rank:9,suit:0},{rank:10,suit:0},{rank:11,suit:0},{rank:12,suit:0}] }
+  ];
+  function renderMiniCard(c){
+    var isRed = SUIT_RED[c.suit];
+    var col = isRed ? "#c9425c" : "#241a2e";
+    return '<div class="mini-card" style="color:'+col+'"><span class="r">'+RANKS[c.rank]+'</span><span class="s">'+SUITS[c.suit]+'</span></div>';
+  }
+  function buildHandGuide(){
+    var el = document.getElementById("handGuideList");
+    el.innerHTML = GUIDE_HANDS.map(function(h){
+      return '<div class="hand-row">' +
+        '<div class="hand-cards">' + h.cards.map(renderMiniCard).join("") + '</div>' +
+        '<div class="hand-info"><span class="hn">'+h.label+'</span><span class="hp">'+h.base+' base pts + rank bonus</span></div>' +
+      '</div>';
+    }).join("");
+  }
+  function openGuide(){ document.getElementById("guideOverlay").hidden = false; }
+  function closeGuide(){ document.getElementById("guideOverlay").hidden = true; }
+  document.getElementById("guideBtn").addEventListener("click", openGuide);
+  document.getElementById("guideClose").addEventListener("click", closeGuide);
+  document.getElementById("guideOverlay").addEventListener("click", function(e){
+    if (e.target.id === "guideOverlay") closeGuide();
+  });
+  buildHandGuide();
+
+  // ---------- achievements panel ----------
+  function buildAchievementsPanel(){
+    var n = unlockedCount();
+    document.getElementById("achvSummary").textContent =
+      n + " / " + ACHIEVEMENTS.length + " unlocked — each grants a permanent +2% score bonus, on every future run. Current legacy bonus: +" + Math.round((legacyMultiplier()-1)*100) + "%.";
+    var el = document.getElementById("achvList");
+    el.innerHTML = ACHIEVEMENTS.map(function(a){
+      var unlocked = !!unlockedAchv[a.id];
+      return '<div class="achv-row' + (unlocked?'':' locked') + '">' +
+        '<span class="ico">' + (unlocked ? '🏆' : '🔒') + '</span>' +
+        '<div><div class="an">' + (unlocked ? a.name : '???') + '</div>' +
+        '<div class="ad">' + (unlocked ? a.desc : 'Secret — clear a hand to find out.') + '</div></div>' +
+      '</div>';
+    }).join("");
+  }
+  function openAchv(){ buildAchievementsPanel(); document.getElementById("achvOverlay").hidden = false; }
+  function closeAchv(){ document.getElementById("achvOverlay").hidden = true; }
+  document.getElementById("achvBtn").addEventListener("click", openAchv);
+  document.getElementById("achvClose").addEventListener("click", closeAchv);
+  document.getElementById("achvOverlay").addEventListener("click", function(e){
+    if (e.target.id === "achvOverlay") closeAchv();
+  });
+
+  // ---------- toast ----------
+  var toastEl = document.getElementById("toast");
+  var toastTimer = null;
+  function showToast(msg){
+    toastEl.textContent = msg;
+    toastEl.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function(){ toastEl.classList.remove("show"); }, 2000);
+  }
+
+  // ---------- state ----------
+  var LOGICAL_W = 340, LOGICAL_H = 560;
+  var GRAVITY = 950;
+  var canvas = document.getElementById("game");
+  var ctx = canvas.getContext("2d", { alpha: false });
+  var state = null;
+
+  function freshState(){
+    return {
+      balls: [], particles: [], popups: [],
+      wallLeft: 24, wallRight: 316, floorY: 536, dangerY: 90,
+      dangerTimer: 0,
+      cascadeMult: 0, cascadeTimer: 0, cascadeWindow: 0.7, chainCount: 0,
+      matchCheckTimer: 0,
+      score: 0,
+      dropCooldown: 0,
+      spamHeat: 0, heatWarned: false,
+      aimX: LOGICAL_W/2,
+      queue: [randomCard(), randomCard(), randomCard()],
+      bonusActive: false, bonusChoices: [], bonusTimeLeft: 0,
+      bonusTimer: 6 + Math.random()*6,
+      shakeTime: 0, shakeMag: 0,
+      gameOver: false
+    };
+  }
+
+  function currentMult(){ return (1 + state.cascadeMult) * legacyMultiplier(); }
+
+  function spawnBall(card, x, y){
+    state.balls.push({ x:x, y:y, vx:0, vy:0, r:CARD_R, rank:card.rank, suit:card.suit, joker:!!card.joker, rot:(Math.random()-0.5)*0.2, angv:(Math.random()-0.5)*0.4 });
+  }
+  function spawnParticles(x,y,color,n){
+    for (var i=0;i<n;i++){
+      var ang = Math.random()*Math.PI*2, spd = 60+Math.random()*160;
+      state.particles.push({ x:x,y:y, vx:Math.cos(ang)*spd, vy:Math.sin(ang)*spd, life:0.5+Math.random()*0.3, maxLife:0.8, color:color, r:2+Math.random()*2.5 });
+    }
+  }
+  function spawnPopup(x,y,text,color){
+    state.popups.push({ x:x, y:y, text:text, life:1.1, maxLife:1.1, color:color, vy:-38 });
+  }
+  function triggerShake(mag){ state.shakeMag = Math.max(state.shakeMag, mag); state.shakeTime = 0.22; }
+
+  // ---------- match finding ----------
+  // Cards are matched as small (2-5 card) connected subgroups, found *within*
+  // whatever larger pile they sit in — a big jumbled stack must never block a
+  // valid hand hiding inside it from being found.
+  var REST_SPEED = 90;
+  var MATCH_CHECK_INTERVAL = 0.15;
+
+  function buildAdjacency(list){
+    var adj = list.map(function(){ return []; });
+    for (var i=0;i<list.length;i++){
+      for (var j=i+1;j<list.length;j++){
+        var dx=list[j].x-list[i].x, dy=list[j].y-list[i].y;
+        var dist=Math.sqrt(dx*dx+dy*dy);
+        if (dist < (list[i].r+list[j].r)*1.03){ adj[i].push(j); adj[j].push(i); }
+      }
+    }
+    return adj;
+  }
+
+  function enumerateConnectedSubsets(adj, maxSize){
+    var seen = {};
+    var out = [];
+    function rec(setArr){
+      var sig = setArr.slice().sort(function(a,b){return a-b;}).join(",");
+      if (seen[sig]) return;
+      seen[sig] = true;
+      if (setArr.length>=2) out.push(setArr.slice());
+      if (setArr.length>=maxSize) return;
+      var candidates = {};
+      setArr.forEach(function(m){ adj[m].forEach(function(nb){ if (setArr.indexOf(nb)===-1) candidates[nb]=true; }); });
+      Object.keys(candidates).forEach(function(cStr){ rec(setArr.concat([Number(cStr)])); });
+    }
+    for (var v=0; v<adj.length; v++) rec([v]);
+    return out;
+  }
+
+  function resolveHands(dt){
+    state.matchCheckTimer -= dt;
+    if (state.matchCheckTimer > 0) return;
+    state.matchCheckTimer = MATCH_CHECK_INTERVAL;
+
+    var resting = state.balls.filter(function(b){ return Math.sqrt(b.vx*b.vx+b.vy*b.vy) < REST_SPEED; });
+    if (resting.length < 2) return;
+
+    var adj = buildAdjacency(resting);
+    var subsets = enumerateConnectedSubsets(adj, 5);
+    if (!subsets.length) return;
+
+    var candidates = [];
+    subsets.forEach(function(idxs){
+      var members = idxs.map(function(i){ return resting[i]; });
+      var hand = evaluateHand(members);
+      if (hand) candidates.push({ members: members, hand: hand });
+    });
+    if (!candidates.length) return;
+
+    candidates.sort(function(a,b){ return b.hand.score - a.hand.score; });
+
+    var used = [];
+    var toRemove = [];
+    candidates.forEach(function(cand){
+      if (cand.members.some(function(m){ return used.indexOf(m)!==-1; })) return;
+      cand.members.forEach(function(m){ used.push(m); });
+
+      var members = cand.members, hand = cand.hand;
+      var cx = members.reduce(function(s,b){return s+b.x;},0)/members.length;
+      var cy = members.reduce(function(s,b){return s+b.y;},0)/members.length;
+      var nearDanger = members.some(function(b){ return (b.y - b.r) < state.dangerY + 24; });
+
+      if (state.cascadeTimer > 0) { state.cascadeMult = Math.min(3, state.cascadeMult + 0.25); state.chainCount++; }
+      else { state.cascadeMult = 0; state.chainCount = 1; }
+      state.cascadeTimer = state.cascadeWindow;
+
+      // Higher-value cards pay a bonus on top of the base hand score, so a
+      // pair of Aces colliding is worth far more than a pair of 2s.
+      var hasJoker = members.some(function(b){ return b.joker; });
+      var valued = members.filter(function(b){ return !b.joker; });
+      var avgValue = valued.length ? valued.reduce(function(s,b){return s+(b.rank+2);},0)/valued.length : 8;
+      var rankBonus = Math.round((avgValue-2)*3);
+      var jokerBonus = hasJoker ? JOKER_BONUS : 0;
+      var gained = Math.round((hand.score + rankBonus) * currentMult()) + jokerBonus;
+      state.score += gained;
+
+      spawnParticles(cx, cy, "rgb(" + hand.color.join(",") + ")", 10 + members.length*4);
+      spawnPopup(cx, cy, (hasJoker ? "🃏 " : "") + hand.label + "  +" + gained, "rgb(" + hand.color.join(",") + ")");
+      if (hasJoker) showToast("🃏 Joker bonus +" + jokerBonus);
+      if (hand.score >= 90 || hasJoker) triggerShake(Math.min(10, hand.score/16 + (hasJoker?4:0)));
+      if (hand.score >= 140 || hasJoker) sfxBig(); else sfxClear(members[0].rank<0?0:members[0].rank);
+
+      checkAchievements({ label: hand.label, nearDanger: nearDanger, chainCount: state.chainCount, hasJoker: hasJoker, avgValue: avgValue, score: state.score });
+
+      members.forEach(function(m){ toRemove.push(m); });
+      updateHud();
+    });
+
+    if (toRemove.length){
+      state.balls = state.balls.filter(function(b){ return toRemove.indexOf(b) === -1; });
+    }
+  }
+
+  // ---------- physics ----------
+  function stepPhysics(dt){
+    var balls = state.balls, g = GRAVITY;
+    for (var i=0;i<balls.length;i++){
+      var b = balls[i];
+      b.vy += g*dt; b.x += b.vx*dt; b.y += b.vy*dt; b.rot += b.angv*dt + b.vx*dt*0.01;
+      if (b.x - b.r < state.wallLeft){ b.x = state.wallLeft + b.r; b.vx = Math.abs(b.vx)*0.4; }
+      if (b.x + b.r > state.wallRight){ b.x = state.wallRight - b.r; b.vx = -Math.abs(b.vx)*0.4; }
+      if (b.y + b.r > state.floorY){ b.y = state.floorY - b.r; b.vy = -b.vy*0.18; if (Math.abs(b.vy)<12) b.vy=0; }
+    }
+    for (var iter=0; iter<2; iter++){
+      for (var p=0;p<balls.length;p++){
+        for (var q=p+1;q<balls.length;q++){
+          var A=balls[p], B=balls[q];
+          var dx=B.x-A.x, dy=B.y-A.y;
+          var dist=Math.sqrt(dx*dx+dy*dy)||0.0001;
+          var minDist=A.r+B.r;
+          if (dist < minDist){
+            var overlap = minDist-dist, nx=dx/dist, ny=dy/dist, push=overlap/2;
+            A.x -= nx*push; A.y -= ny*push; B.x += nx*push; B.y += ny*push;
+            var relvx=B.vx-A.vx, relvy=B.vy-A.vy, rel=relvx*nx+relvy*ny;
+            if (rel < 0){ var imp=-rel*0.22; A.vx-=nx*imp; A.vy-=ny*imp; B.vx+=nx*imp; B.vy+=ny*imp; }
+          }
+        }
+      }
+    }
+    for (var di=0; di<balls.length; di++){ balls[di].vx *= 0.985; balls[di].vy *= 0.99; }
+
+    resolveHands(dt);
+
+    var overLine = false;
+    for (var k=0;k<state.balls.length;k++){
+      var bb = state.balls[k];
+      if (bb.y - bb.r < state.dangerY){
+        var speed = Math.sqrt(bb.vx*bb.vx+bb.vy*bb.vy);
+        if (speed < 220) overLine = true;
+      }
+    }
+    if (overLine) state.dangerTimer += dt; else state.dangerTimer = 0;
+    if (state.dangerTimer > 1.15) triggerGameOver();
+
+    for (var pi=state.particles.length-1; pi>=0; pi--){
+      var pt = state.particles[pi];
+      pt.x += pt.vx*dt; pt.y += pt.vy*dt; pt.vx*=0.92; pt.vy*=0.92; pt.life -= dt;
+      if (pt.life<=0) state.particles.splice(pi,1);
+    }
+    for (var pu=state.popups.length-1; pu>=0; pu--){
+      var pp = state.popups[pu];
+      pp.y += pp.vy*dt; pp.life -= dt;
+      if (pp.life<=0) state.popups.splice(pu,1);
+    }
+
+    if (state.cascadeTimer > 0){ state.cascadeTimer -= dt; if (state.cascadeTimer<=0){ state.cascadeMult=0; state.chainCount=0; } }
+    if (state.dropCooldown > 0) state.dropCooldown -= dt;
+    if (state.spamHeat > 0) state.spamHeat = Math.max(0, state.spamHeat - dt*0.45);
+    if (state.shakeTime > 0){ state.shakeTime -= dt; state.shakeMag *= 0.9; } else state.shakeMag = 0;
+
+    if (!state.bonusActive){
+      if (state.spamHeat < 0.5) state.bonusTimer -= dt;
+      if (state.bonusTimer <= 0 && !state.gameOver) triggerBonusWindow();
+    } else {
+      state.bonusTimeLeft -= dt;
+      var cd = document.getElementById("bonusCountdown");
+      if (cd) cd.textContent = state.bonusTimeLeft > 0 ? ("Pick one… " + state.bonusTimeLeft.toFixed(1) + "s") : "Missed it";
+      if (state.bonusTimeLeft <= 0) closeBonusWindow();
+    }
+  }
+
+  function triggerGameOver(){
+    state.gameOver = true;
+    state.bonusActive = false;
+    document.getElementById("bonusPanel").hidden = true;
+    if (state.score > saved.best){ saved.best = state.score; persistBest(); }
+    sfxGameOver();
+    document.getElementById("finalScore").textContent = Math.round(state.score).toLocaleString();
+    document.getElementById("recordLine").textContent = (state.score >= saved.best) ? "New best!" : ("Best " + Math.round(saved.best).toLocaleString());
+    document.getElementById("gameOverOverlay").hidden = false;
+  }
+
+  // ---------- input ----------
+  function localCoords(e){
+    var rect = canvas.getBoundingClientRect();
+    var scale = LOGICAL_W / rect.width;
+    return { x: (e.clientX-rect.left)*scale, y: (e.clientY-rect.top)*scale };
+  }
+  function updateAim(e){
+    if (state.gameOver) return;
+    var p = localCoords(e);
+    state.aimX = Math.max(state.wallLeft+CARD_R, Math.min(state.wallRight-CARD_R, p.x));
+  }
+  function tryDrop(){
+    if (state.gameOver || state.dropCooldown > 0) return;
+    if (state.balls.length >= MAX_BALLS){ triggerGameOver(); return; }
+    var card = state.queue[0];
+    spawnBall(card, state.aimX, state.dangerY - CARD_R - 6);
+
+    state.spamHeat = Math.min(3, state.spamHeat + 0.4);
+    if (state.spamHeat > 1.5 && !state.heatWarned){
+      state.heatWarned = true;
+      showToast("Dealer's rushed — cards are scrambling");
+    }
+
+    var boardCards = state.balls.filter(function(b){ return !b.joker; }).map(function(b){ return { rank:b.rank, suit:b.suit }; });
+    state.queue.shift();
+    state.queue.push(randomCard(state.spamHeat, boardCards));
+    state.dropCooldown = 0.3 + state.spamHeat*0.15;
+    sfxDrop();
+  }
+  canvas.addEventListener("pointermove", updateAim);
+  canvas.addEventListener("pointerdown", function(e){ ensureAudio(); updateAim(e); });
+  canvas.addEventListener("pointerup", function(e){ updateAim(e); tryDrop(); });
+
+  // ---------- bonus draw ----------
+  // The base drop flow never changes. Instead, an occasional "Bonus Draw"
+  // window offers a free pick-of-3 for extra points — but the countdown to
+  // the next one only advances while spam heat is low, and freezes while
+  // it's high. Spamming doesn't just fail to pay off; it actively delays
+  // the next bonus from ever showing up, so calm, attentive play is what
+  // gets rewarded. Ignoring an open window costs nothing — pure upside.
+  var BONUS_WINDOW = 6;
+  var BONUS_POINTS = 40;
+  function triggerBonusWindow(){
+    state.bonusActive = true;
+    state.bonusTimeLeft = BONUS_WINDOW;
+    state.bonusChoices = [randomCard(), randomCard(), randomCard()];
+    renderBonusPicker();
+    document.getElementById("bonusPanel").hidden = false;
+    showToast("✨ Bonus Draw — pick one!");
+  }
+  function claimBonus(i){
+    if (!state.bonusActive || state.gameOver) return;
+    var card = state.bonusChoices[i];
+    if (state.balls.length < MAX_BALLS){
+      spawnBall(card, state.aimX, state.dangerY - CARD_R - 6);
+      state.score += BONUS_POINTS;
+      spawnPopup(state.aimX, state.dangerY - CARD_R - 6, "Bonus +" + BONUS_POINTS, "rgb(240,166,58)");
+      sfxBig();
+      updateHud();
+    }
+    closeBonusWindow();
+  }
+  function closeBonusWindow(){
+    state.bonusActive = false;
+    state.bonusTimer = 8 + Math.random()*8;
+    document.getElementById("bonusPanel").hidden = true;
+  }
+  function renderBonusPicker(){
+    var el = document.getElementById("bonusCards");
+    el.innerHTML = state.bonusChoices.map(function(card, i){
+      if (card.joker){
+        return '<button class="hand-card joker" data-i="'+i+'" type="button" aria-label="Joker, wild card">🃏</button>';
+      }
+      var isRed = SUIT_RED[card.suit];
+      var col = isRed ? "#c9425c" : "#241a2e";
+      var suitName = ["Spades","Hearts","Diamonds","Clubs"][card.suit];
+      return '<button class="hand-card" data-i="'+i+'" type="button" style="color:'+col+'" aria-label="'+RANKS[card.rank]+' of '+suitName+'"><span class="r">'+RANKS[card.rank]+'</span><span class="s">'+SUITS[card.suit]+'</span></button>';
+    }).join("");
+    Array.prototype.forEach.call(el.querySelectorAll(".hand-card"), function(btn){
+      btn.addEventListener("click", function(){ claimBonus(Number(btn.dataset.i)); });
+    });
+  }
+
+  // ---------- rendering ----------
+  function drawCard(b){
+    ctx.save();
+    ctx.translate(b.x, b.y);
+    ctx.rotate(b.rot);
+
+    var s = b.r*1.7, rr = b.r*0.3;
+    ctx.beginPath();
+    roundRectPath(-s/2, -s/2*1.28, s, s*1.28, rr);
+
+    if (b.joker){
+      var jg = ctx.createLinearGradient(-s/2,-s/2,s/2,s/2);
+      jg.addColorStop(0, "#fff3d6"); jg.addColorStop(0.5, "#f0a63a"); jg.addColorStop(1, "#e0518c");
+      ctx.fillStyle = jg; ctx.fill();
+      ctx.lineWidth = 1.8; ctx.strokeStyle = "rgba(36,26,46,0.6)"; ctx.stroke();
+      ctx.fillStyle = "#241a2e";
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.font = Math.round(b.r*0.9) + "px system-ui, sans-serif";
+      ctx.fillText("🃏", 0, b.r*0.05);
+      ctx.restore();
+      return;
+    }
+
+    var g = ctx.createLinearGradient(-s/2,-s/2,s/2,s/2);
+    g.addColorStop(0, "#fbf7ee");
+    g.addColorStop(1, "#e9e0cd");
+    ctx.fillStyle = g;
+    ctx.fill();
+    ctx.lineWidth = 1.6;
+    ctx.strokeStyle = "rgba(36,26,46,0.55)";
+    ctx.stroke();
+
+    var isRed = SUIT_RED[b.suit];
+    var col = isRed ? "#c9425c" : "#241a2e";
+    ctx.fillStyle = col;
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.font = "700 " + Math.round(b.r*0.68) + "px 'Space Mono', monospace";
+    ctx.fillText(RANKS[b.rank], 0, -b.r*0.24);
+    ctx.font = Math.round(b.r*0.62) + "px system-ui, sans-serif";
+    ctx.fillText(SUITS[b.suit], 0, b.r*0.42);
+
+    ctx.font = "700 " + Math.round(b.r*0.24) + "px 'Space Mono', monospace";
+    ctx.textAlign = "left"; ctx.textBaseline = "top";
+    ctx.fillText(RANKS[b.rank], -s/2 + b.r*0.12, -s/2*1.28 + b.r*0.1);
+
+    ctx.restore();
+  }
+  function roundRectPath(x,y,w,h,r){
+    ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r);
+    ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath();
+  }
+
+  function draw(){
+    ctx.fillStyle = "#140f1c";
+    ctx.fillRect(0,0,LOGICAL_W,LOGICAL_H);
+    ctx.save();
+    if (state.shakeTime>0) ctx.translate((Math.random()-0.5)*state.shakeMag, (Math.random()-0.5)*state.shakeMag);
+
+    ctx.strokeStyle = "rgba(240,166,58,0.28)"; ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(state.wallLeft, state.dangerY-10); ctx.lineTo(state.wallLeft, state.floorY);
+    ctx.lineTo(state.wallRight, state.floorY); ctx.lineTo(state.wallRight, state.dangerY-10);
+    ctx.stroke();
+
+    var dangerAlpha = 0.35 + (state.dangerTimer>0 ? Math.min(0.5, state.dangerTimer*0.4) : 0);
+    ctx.strokeStyle = "rgba(239,77,94," + dangerAlpha + ")";
+    ctx.setLineDash([6,6]);
+    ctx.beginPath(); ctx.moveTo(state.wallLeft, state.dangerY); ctx.lineTo(state.wallRight, state.dangerY); ctx.stroke();
+    ctx.setLineDash([]);
+
+    state.balls.forEach(drawCard);
+
+    state.particles.forEach(function(pt){
+      var a = Math.max(0, pt.life/pt.maxLife);
+      ctx.fillStyle = pt.color.replace("rgb(", "rgba(").replace(")", "," + (a*0.85) + ")");
+      ctx.beginPath(); ctx.arc(pt.x, pt.y, pt.r, 0, Math.PI*2); ctx.fill();
+    });
+
+    state.popups.forEach(function(pp){
+      var a = Math.max(0, pp.life/pp.maxLife);
+      ctx.globalAlpha = a;
+      ctx.fillStyle = pp.color;
+      ctx.font = "700 13px 'Unbounded', sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText(pp.text, pp.x, pp.y);
+      ctx.globalAlpha = 1;
+    });
+
+    if (!state.gameOver){
+      var ghost = { x: state.aimX, y: state.dangerY - CARD_R - 6, r: CARD_R, rank: state.queue[0].rank, suit: state.queue[0].suit, joker: state.queue[0].joker, rot:0 };
+      ctx.globalAlpha = 0.92; drawCard(ghost); ctx.globalAlpha = 1;
+
+      ctx.strokeStyle = "rgba(243,236,225,0.18)";
+      ctx.setLineDash([2,5]);
+      ctx.beginPath(); ctx.moveTo(state.aimX, ghost.y + CARD_R); ctx.lineTo(state.aimX, state.dangerY); ctx.stroke();
+      ctx.setLineDash([]);
+
+      var nx = state.wallRight - CARD_R - 4, ny = state.dangerY - 34;
+      ctx.globalAlpha = 0.6;
+      drawCard({x:nx,y:ny,r:CARD_R*0.8,rank:state.queue[1].rank,suit:state.queue[1].suit,joker:state.queue[1].joker,rot:0.12});
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = "rgba(180,168,194,0.8)";
+      ctx.font = "700 9px 'Space Mono', monospace";
+      ctx.textAlign = "center";
+      ctx.fillText("NEXT", nx, ny - CARD_R - 4);
+
+      if (unlockedAchv.oracle){
+        var nx2 = nx - CARD_R*1.7, ny2 = ny;
+        ctx.globalAlpha = 0.4;
+        drawCard({x:nx2,y:ny2,r:CARD_R*0.7,rank:state.queue[2].rank,suit:state.queue[2].suit,joker:state.queue[2].joker,rot:-0.1});
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = "rgba(180,168,194,0.6)";
+        ctx.font = "700 8px 'Space Mono', monospace";
+        ctx.fillText("ORACLE", nx2, ny2 - CARD_R - 4);
+      }
+    }
+
+    ctx.restore();
+  }
+
+  function updateHud(){
+    document.getElementById("scoreVal").textContent = Math.round(state.score).toLocaleString();
+    document.getElementById("bestVal").textContent = Math.round(Math.max(saved.best, state.score)).toLocaleString();
+    document.getElementById("multVal").textContent = "×" + currentMult().toFixed(1);
+  }
+
+  function resize(){
+    var rect = canvas.getBoundingClientRect();
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    var scale = (rect.width / LOGICAL_W) * dpr;
+    canvas.width = Math.round(LOGICAL_W * scale);
+    canvas.height = Math.round(LOGICAL_H * scale);
+    ctx.setTransform(scale, 0, 0, scale, 0, 0);
+  }
+  window.addEventListener("resize", resize);
+  window.addEventListener("orientationchange", resize);
+
+  var lastTime = null, accumulator = 0, FIXED_DT = 1/120;
+  function loop(ts){
+    if (lastTime == null) lastTime = ts;
+    var frameDt = Math.min(0.25, (ts-lastTime)/1000);
+    lastTime = ts;
+    if (!state.gameOver){
+      accumulator += frameDt;
+      var steps = 0;
+      while (accumulator >= FIXED_DT && steps < 6){ stepPhysics(FIXED_DT); accumulator -= FIXED_DT; steps++; }
+    }
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  function newGame(){
+    state = freshState();
+    document.getElementById("gameOverOverlay").hidden = true;
+    document.getElementById("bonusPanel").hidden = true;
+    updateHud();
+  }
+  document.getElementById("newGameBtn").addEventListener("click", newGame);
+  document.getElementById("restartBtn").addEventListener("click", newGame);
+
+  newGame(); resize(); requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
