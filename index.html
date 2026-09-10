@@ -321,7 +321,12 @@
   var SUITS = ["♠","♥","♦","♣"]; // spade heart diamond club
   var SUIT_RED = [false, true, true, false];
   var CARD_R = 20;
-  var MAX_BALLS = 40;
+  // Was 40 — roughly double the equilibrium ball count measured under
+  // sustained wide-spread spam (10-20, oscillating). At 40 the count-based
+  // cap never came close to firing; a spam run just idled at that
+  // equilibrium indefinitely. Lowered so the hard cap is actually within
+  // reach of that equilibrium's natural upper excursions.
+  var MAX_BALLS = 26;
 
   var JOKER_CHANCE = 0.04;
   var JOKER_BONUS = 150;
@@ -338,7 +343,13 @@
     var jokerChance = spamHeat >= 2 ? 0 : JOKER_CHANCE * Math.max(0.1, 1 - spamHeat/2);
     if (Math.random() < jokerChance) return { rank:-1, suit:-1, joker:true };
     var attempts = spamHeat > 2 ? 14 : (spamHeat > 1 ? 7 : 1);
-    var hardMode = spamHeat >= 2; // at max heat, also starve same-rank supply (blocks Trips/Quads/Flush farming, not just exact Match)
+    // Was spamHeat>=2 (== max heat only). Heat ramps up fast under
+    // continuous clicking (+0.4/drop, cap 3) but decays slowly (-0.45/s),
+    // so in practice a sustained spam run spent much of its time below 2
+    // and kept getting fed fresh rank-dupes the whole time — the exact
+    // supply that fuels reflexive Pair/Trip/Flush clearing. Lowered so
+    // suppression starts well before heat maxes out, not only at the cap.
+    var hardMode = spamHeat >= 1.3;
     var card;
     for (var i=0;i<attempts;i++){
       card = { rank: Math.floor(Math.random()*13), suit: Math.floor(Math.random()*4), joker:false };
@@ -627,8 +638,25 @@
     var resting = state.balls.filter(function(b){ return Math.sqrt(b.vx*b.vx+b.vy*b.vy) < REST_SPEED && b.restTime >= MIN_REST_TIME; });
     if (resting.length < 2) return;
 
+    // Under sustained heat, cap how large a connected group is even allowed
+    // to be *evaluated* for a hand — not just which cards can be dealt.
+    // Measured: suppressing rank-duplicate supply alone (hardMode) still let
+    // score climb (3,164 -> 5,277 over 5 min at MAX_BALLS=26) because a
+    // duplicate-starved board is incidentally full of *diverse* ranks —
+    // exactly the raw material Straights and Flushes need, so 5-card
+    // structural hands quietly took over as the clearing mechanism instead.
+    // Capping evaluated size directly under heat closes that off regardless
+    // of which hand type would've exploited the diversity.
+    // Thresholds must sit close to the heat cap (3), not mid-range: the heat
+    // model itself trends upward for ANY drop pace faster than ~0.89s
+    // between drops (0.4 gain/drop vs 0.45/s decay) — a brisk-but-normal
+    // human easily lands in that range. Measured: thresholds of 1.3/2.2
+    // busted a realistic 500-900ms-paced test run in 28s, which is not
+    // spam, just playing at a normal clip. Only genuinely sustained,
+    // bot-speed clicking keeps heat pinned this close to the cap.
+    var maxEvalSize = state.spamHeat >= 2.9 ? 2 : (state.spamHeat >= 2.5 ? 3 : 5);
     var adj = buildAdjacency(resting);
-    var subsets = enumerateConnectedSubsets(adj, 5);
+    var subsets = enumerateConnectedSubsets(adj, maxEvalSize);
     if (!subsets.length) return;
 
     var candidates = [];
