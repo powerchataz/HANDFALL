@@ -704,15 +704,19 @@
 
     resolveHands(dt);
 
+    // Danger is a position check, not a velocity check — whether a card's
+    // top is above the line is what actually matters. Requiring low speed
+    // let dense-pile jitter mask a genuinely stuck card (one bad frame of
+    // collision noise would hard-reset the timer to zero); a soft decay
+    // when clear, instead of a hard reset, means brief jitter or a card
+    // quickly falling past the line doesn't erase real accumulated danger.
     var overLine = false;
     for (var k=0;k<state.balls.length;k++){
       var bb = state.balls[k];
-      if (bb.y - bb.r < state.dangerY){
-        var speed = Math.sqrt(bb.vx*bb.vx+bb.vy*bb.vy);
-        if (speed < 220) overLine = true;
-      }
+      if (bb.y - bb.r < state.dangerY) { overLine = true; break; }
     }
-    if (overLine) state.dangerTimer += dt; else state.dangerTimer = 0;
+    if (overLine) state.dangerTimer += dt;
+    else state.dangerTimer = Math.max(0, state.dangerTimer - dt*2);
     var graceThreshold = 1.15 - pT*0.35;
     if (state.dangerTimer > graceThreshold) triggerGameOver();
 
