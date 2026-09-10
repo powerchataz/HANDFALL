@@ -653,6 +653,7 @@
       elapsed: 0, pressureMaxWarned: false,
       shieldTime: 0,
       bestHandLabel: null, bestHandScore: 0,
+      hasStarted: false,
       gameOver: false
     };
   }
@@ -820,7 +821,12 @@
 
   // ---------- physics ----------
   function stepPhysics(dt){
-    state.elapsed += dt;
+    // elapsed (and therefore the whole pressure ramp) only advances after
+    // the player's first drop — the physics loop runs continuously from
+    // page load regardless of overlays, so without this gate, time spent
+    // reading the onboarding modal or Hand Guide before ever touching the
+    // game was silently burning into the difficulty clock.
+    if (state.hasStarted) state.elapsed += dt;
     var pT = pressureT();
     state.dangerY = DANGER_Y_BASE + pT*20;
     if (pT >= 1 && !state.pressureMaxWarned){ state.pressureMaxWarned = true; showToast("Pressure maxed — the felt won't get any smaller"); }
@@ -906,7 +912,11 @@
     if (state.shakeTime > 0){ state.shakeTime -= dt; state.shakeMag *= 0.9; } else state.shakeMag = 0;
 
     if (!state.bonusActive){
-      if (state.spamHeat < 0.5) state.bonusTimer -= dt;
+      // Same fix as elapsed above: bonusTimer starts pre-loaded (6-12s) and
+      // was counting down unconditionally, so it could fire — or nearly
+      // fire — before a player's first drop if they spent that long
+      // reading the onboarding modal or Hand Guide first.
+      if (state.hasStarted && state.spamHeat < 0.5) state.bonusTimer -= dt;
       if (state.bonusTimer <= 0 && !state.gameOver) triggerBonusWindow();
     } else {
       state.bonusTimeLeft -= dt;
@@ -949,6 +959,7 @@
   function tryDrop(){
     if (state.gameOver || state.dropCooldown > 0) return;
     if (state.balls.length >= MAX_BALLS){ triggerGameOver(); return; }
+    state.hasStarted = true;
     var card = state.queue[0];
     spawnBall(card, state.aimX, state.dangerY - CARD_R - 6);
 
