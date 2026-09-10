@@ -352,12 +352,12 @@
 
   // hand evaluation: cards = [{rank,suit}], size 2-5
   var HAND_SCORE = {
-    "Match":12, "High Card":5, "Pair":10, "Two Pair":25, "Three of a Kind":35,
+    "Match":12, "Pair":10, "Two Pair":25, "Three of a Kind":35,
     "Straight":60, "Flush":70, "Full House":90, "Four of a Kind":140,
     "Straight Flush":250, "Royal Flush":500
   };
   var HAND_COLOR = {
-    "Match":[62,207,142], "High Card":[122,111,140], "Pair":[62,207,142], "Two Pair":[62,207,142],
+    "Match":[62,207,142], "Pair":[62,207,142], "Two Pair":[62,207,142],
     "Three of a Kind":[240,166,58], "Straight":[240,166,58], "Flush":[224,81,140],
     "Full House":[224,81,140], "Four of a Kind":[239,77,94],
     "Straight Flush":[255,224,140], "Royal Flush":[255,224,140]
@@ -413,7 +413,7 @@
     if (counts[0]===3) return mk("Three of a Kind");
     if (counts[0]===2 && counts[1]===2) return mk("Two Pair");
     if (counts[0]===2) return mk("Pair");
-    return mk("High Card");
+    return null; // High Card isn't a real poker hand — 5 unrelated touching cards must NOT auto-clear
 
     function mk(label){ return { label: label, score: HAND_SCORE[label], color: HAND_COLOR[label] }; }
   }
