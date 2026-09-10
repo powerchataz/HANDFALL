@@ -256,6 +256,24 @@
   </div>
 </div>
 
+<div class="overlay" id="onboardOverlay" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="onboardTitle">
+    <h2 id="onboardTitle">Welcome to Handfall</h2>
+    <p class="sub" style="margin-bottom:14px;">
+      <b>Move</b> to aim, <b>tap or click</b> to drop a card. Any 2&ndash;5
+      touching cards that form a poker hand &mdash; starting with an exact
+      match &mdash; clear together and score points. That's your only relief
+      from the pile, so watch for cards you can connect.
+    </p>
+    <p class="sub" style="margin-bottom:18px;">
+      Don't let a card linger above the <b style="color:var(--danger);">red
+      line</b> near the top &mdash; that's how a run ends. The pressure bar
+      shows how much the felt is closing in over time.
+    </p>
+    <button class="go" id="onboardStart" type="button">Let's play</button>
+  </div>
+</div>
+
 <div class="overlay" id="historyOverlay" hidden>
   <div class="modal wide" role="dialog" aria-modal="true" aria-labelledby="historyTitle" style="position:relative;">
     <button class="close-x" id="historyClose" type="button" aria-label="Close run history">&times;</button>
@@ -289,10 +307,12 @@
   var SAVE_KEY = "handfall_save_v1";
   var ACHV_KEY = "handfall_achv_v1";
   var HISTORY_KEY = "handfall_history_v1";
+  var ONBOARD_KEY = "handfall_onboarded_v1";
   var HISTORY_MAX = 20;
   var saved = { best: 0 };
   var unlockedAchv = {};
   var runHistory = [];
+  var needsOnboarding = false;
   try {
     var raw = localStorage.getItem(SAVE_KEY);
     if (raw) { var parsed = JSON.parse(raw); if (parsed && typeof parsed.best === "number") saved.best = parsed.best; }
@@ -305,9 +325,13 @@
     var rawH = localStorage.getItem(HISTORY_KEY);
     if (rawH) { var parsedH = JSON.parse(rawH); if (Array.isArray(parsedH)) runHistory = parsedH; }
   } catch (e) {}
+  try {
+    needsOnboarding = !localStorage.getItem(ONBOARD_KEY);
+  } catch (e) { needsOnboarding = false; }
   function persistBest(){ try { localStorage.setItem(SAVE_KEY, JSON.stringify({ best: saved.best })); } catch (e) {} }
   function persistAchv(){ try { localStorage.setItem(ACHV_KEY, JSON.stringify(unlockedAchv)); } catch (e) {} }
   function persistHistory(){ try { localStorage.setItem(HISTORY_KEY, JSON.stringify(runHistory)); } catch (e) {} }
+  function persistOnboarded(){ try { localStorage.setItem(ONBOARD_KEY, "1"); } catch (e) {} }
 
   // ---------- audio ----------
   var actx = null;
@@ -1179,6 +1203,15 @@
   }
   document.getElementById("newGameBtn").addEventListener("click", newGame);
   document.getElementById("restartBtn").addEventListener("click", newGame);
+
+  // ---------- first-run onboarding ----------
+  // Shown once, ever, per device — the mechanic was previously only
+  // explained if a player thought to open the Hand Guide themselves.
+  document.getElementById("onboardStart").addEventListener("click", function(){
+    document.getElementById("onboardOverlay").hidden = true;
+    persistOnboarded();
+  });
+  if (needsOnboarding) document.getElementById("onboardOverlay").hidden = false;
 
   newGame(); resize(); requestAnimationFrame(loop);
 })();
