@@ -778,13 +778,16 @@
   function claimBonus(i){
     if (!state.bonusActive || state.gameOver) return;
     var card = state.bonusChoices[i];
-    if (state.balls.length < MAX_BALLS){
-      spawnBall(card, state.aimX, state.dangerY - CARD_R - 6);
-      state.score += BONUS_POINTS;
-      spawnPopup(state.aimX, state.dangerY - CARD_R - 6, "Bonus +" + BONUS_POINTS, "rgb(240,166,58)");
-      sfxBig();
-      updateHud();
-    }
+    // Claiming always pays the points — that's the "pure upside" the hint
+    // promises. The card itself only physically lands if there's room; a
+    // full board still banks the points instead of silently doing nothing.
+    var placed = state.balls.length < MAX_BALLS;
+    if (placed) spawnBall(card, state.aimX, state.dangerY - CARD_R - 6);
+    state.score += BONUS_POINTS;
+    spawnPopup(state.aimX, state.dangerY - CARD_R - 6, "Bonus +" + BONUS_POINTS, "rgb(240,166,58)");
+    if (!placed) showToast("Table's full — bonus banked as points only");
+    sfxBig();
+    updateHud();
     closeBonusWindow();
   }
   function closeBonusWindow(){
