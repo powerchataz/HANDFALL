@@ -189,7 +189,6 @@
 </style>
 </head>
 <body>
-
 <div class="app">
   <header>
     <div class="title-block">
@@ -549,9 +548,13 @@
   // 4 minutes of a run: gravity speeds up, the grace period before a
   // lingering card ends the run shrinks, and the danger line itself creeps
   // down, shrinking the usable stack height — all visible, none hidden.
-  var PRESSURE_RAMP_SECONDS = 240;
+  var PRESSURE_RAMP_SECONDS = 150;
   var DANGER_Y_BASE = 90;
-  function pressureT(){ return Math.min(1, state.elapsed / PRESSURE_RAMP_SECONDS); }
+  // Ease-out (sqrt) instead of linear: pressure now climbs fast in the
+  // opening seconds and only tapers as it nears the cap, so a run reaches
+  // meaningful pressure much sooner instead of spending its first couple
+  // minutes near-flat before ramping felt difficulty.
+  function pressureT(){ return Math.sqrt(Math.min(1, state.elapsed / PRESSURE_RAMP_SECONDS)); }
 
   function currentMult(){ return (1 + state.cascadeMult) * legacyMultiplier(); }
 
