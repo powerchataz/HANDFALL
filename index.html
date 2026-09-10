@@ -69,6 +69,9 @@
   .pressure-fill{ height:100%; width:0%; background:linear-gradient(90deg,var(--amber),var(--danger)); transition:width .4s linear; }
   @media (prefers-reduced-motion: reduce){ .pressure-fill{ transition:none; } }
 
+  .zen-toggle{ display:flex; align-items:center; gap:8px; font-size:11px; color:var(--ink-faint); cursor:pointer; letter-spacing:0.01em; }
+  .zen-toggle input{ accent-color:var(--teal); width:14px; height:14px; flex:0 0 auto; cursor:pointer; }
+
   .hud{ display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
   .chip{ background:linear-gradient(160deg,var(--felt),var(--bg-1)); border:1px solid var(--felt-edge); border-radius:10px; padding:9px 12px; }
   .chip .label{ font-size:10px; letter-spacing:0.09em; text-transform:uppercase; color:var(--ink-faint); margin-bottom:3px; }
@@ -218,6 +221,11 @@
     <div class="pressure-track"><div class="pressure-fill" id="pressureFill"></div></div>
   </div>
 
+  <label class="zen-toggle" for="zenToggle">
+    <input type="checkbox" id="zenToggle">
+    <span>Zen mode &mdash; no pressure ramp, just practice matching</span>
+  </label>
+
   <div class="table-wrap">
     <canvas id="game" width="340" height="560" role="img" aria-label="Handfall play field"></canvas>
     <div class="toast" id="toast"></div>
@@ -229,7 +237,7 @@
     <div class="bonus-sub" id="bonusCountdown">Pick one&hellip;</div>
   </div>
 
-  <p class="hint"><b>Move</b> to aim &middot; <b>tap / click</b> to drop &middot; any 2&ndash;5 touching cards that form a poker hand clear together &mdash; that's your only real relief from overflow. Stay calm and a Bonus Draw will occasionally appear above.</p>
+  <p class="hint"><b>Move</b> to aim (or &larr;/&rarr;) &middot; <b>tap / click</b> to drop (or Space) &middot; any 2&ndash;5 touching cards that form a poker hand clear together &mdash; that's your only real relief from overflow. Stay calm and a Bonus Draw will occasionally appear above.</p>
 
   <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px;">
     <button class="guide-toggle tri" id="guideBtn" type="button"><span class="ic">🂡</span> Guide</button>
@@ -260,7 +268,8 @@
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="onboardTitle">
     <h2 id="onboardTitle">Welcome to Handfall</h2>
     <p class="sub" style="margin-bottom:14px;">
-      <b>Move</b> to aim, <b>tap or click</b> to drop a card. Any 2&ndash;5
+      <b>Move</b> to aim (or &larr;/&rarr;), <b>tap/click</b> to drop (or
+      Space). Any 2&ndash;5
       touching cards that form a poker hand &mdash; starting with an exact
       match &mdash; clear together and score points. That's your only relief
       from the pile, so watch for cards you can connect.
@@ -308,11 +317,13 @@
   var ACHV_KEY = "handfall_achv_v1";
   var HISTORY_KEY = "handfall_history_v1";
   var ONBOARD_KEY = "handfall_onboarded_v1";
+  var ZEN_KEY = "handfall_zen_v1";
   var HISTORY_MAX = 20;
   var saved = { best: 0 };
   var unlockedAchv = {};
   var runHistory = [];
   var needsOnboarding = false;
+  var zenMode = false;
   try {
     var raw = localStorage.getItem(SAVE_KEY);
     if (raw) { var parsed = JSON.parse(raw); if (parsed && typeof parsed.best === "number") saved.best = parsed.best; }
@@ -328,10 +339,14 @@
   try {
     needsOnboarding = !localStorage.getItem(ONBOARD_KEY);
   } catch (e) { needsOnboarding = false; }
+  try {
+    zenMode = localStorage.getItem(ZEN_KEY) === "1";
+  } catch (e) { zenMode = false; }
   function persistBest(){ try { localStorage.setItem(SAVE_KEY, JSON.stringify({ best: saved.best })); } catch (e) {} }
   function persistAchv(){ try { localStorage.setItem(ACHV_KEY, JSON.stringify(unlockedAchv)); } catch (e) {} }
   function persistHistory(){ try { localStorage.setItem(HISTORY_KEY, JSON.stringify(runHistory)); } catch (e) {} }
   function persistOnboarded(){ try { localStorage.setItem(ONBOARD_KEY, "1"); } catch (e) {} }
+  function persistZen(){ try { localStorage.setItem(ZEN_KEY, zenMode ? "1" : "0"); } catch (e) {} }
 
   // ---------- audio ----------
   var actx = null;
@@ -502,7 +517,10 @@
     { id:"joker_found", name:"Wild Draw", desc:"Clear a hand that included the Joker.", test:function(ctx){ return ctx.hasJoker; } },
     { id:"high_roller", name:"High Roller", desc:"Clear a hand averaging Kings or better.", test:function(ctx){ return ctx.avgValue>=13; } },
     { id:"century", name:"Century", desc:"Reach a score of 1,000 in a single run.", test:function(ctx){ return ctx.score>=1000; } },
-    { id:"oracle", name:"Oracle", desc:"Clear a Royal Flush. Reward: permanently reveals the card after next, in every future run.", test:function(ctx){ return ctx.label==="Royal Flush"; } }
+    { id:"oracle", name:"Oracle", desc:"Clear a Royal Flush. Reward: permanently reveals the card after next, in every future run.", test:function(ctx){ return ctx.label==="Royal Flush"; } },
+    { id:"nerves_of_steel", name:"Nerves of Steel", desc:"Clear a hand with the danger timer already most of the way to a bust.", test:function(ctx){ return ctx.dangerTimerAtClear >= 0.8; } },
+    { id:"marathon", name:"Marathon", desc:"Survive a single run for 3 minutes.", test:function(ctx){ return ctx.survivedSeconds >= 180; } },
+    { id:"collector", name:"Collector", desc:"Rack up 5 recorded runs in your history.", test:function(ctx){ return ctx.historyCount >= 5; } }
   ];
   function unlockedCount(){ return ACHIEVEMENTS.filter(function(a){return unlockedAchv[a.id];}).length; }
   function legacyMultiplier(){ return 1 + unlockedCount()*0.02; }
@@ -681,7 +699,11 @@
   // opening seconds and only tapers as it nears the cap, so a run reaches
   // meaningful pressure much sooner instead of spending its first couple
   // minutes near-flat before ramping felt difficulty.
-  function pressureT(){ return Math.sqrt(Math.min(1, state.elapsed / PRESSURE_RAMP_SECONDS)); }
+  // Zen mode holds this at 0 — gravity, danger line and grace period all
+  // stay at their base values, so a run is still losable via overflow, just
+  // without the escalating clock. Good for learning the matching mechanic
+  // without also fighting the ramp.
+  function pressureT(){ return zenMode ? 0 : Math.sqrt(Math.min(1, state.elapsed / PRESSURE_RAMP_SECONDS)); }
 
   function currentMult(){ return (1 + state.cascadeMult) * legacyMultiplier(); }
 
@@ -808,7 +830,7 @@
       if (hand.score >= 90 || hasJoker) triggerShake(Math.min(10, hand.score/16 + (hasJoker?4:0)));
       if (hand.score >= 140 || hasJoker) sfxBig(); else sfxClear(members[0].rank<0?0:members[0].rank);
 
-      checkAchievements({ label: hand.label, nearDanger: nearDanger, chainCount: state.chainCount, hasJoker: hasJoker, avgValue: avgValue, score: state.score });
+      checkAchievements({ label: hand.label, nearDanger: nearDanger, chainCount: state.chainCount, hasJoker: hasJoker, avgValue: avgValue, score: state.score, dangerTimerAtClear: state.dangerTimer, survivedSeconds: state.elapsed });
 
       members.forEach(function(m){ toRemove.push(m); });
       updateHud();
@@ -939,6 +961,10 @@
     });
     if (runHistory.length > HISTORY_MAX) runHistory.length = HISTORY_MAX;
     persistHistory();
+    // Marathon (a run that never cleared a hand after 3min would otherwise
+    // never see the survivedSeconds check above) and Collector both only
+    // make sense to test once the run is actually over.
+    checkAchievements({ survivedSeconds: state.elapsed, historyCount: runHistory.length });
     sfxGameOver();
     document.getElementById("finalScore").textContent = Math.round(state.score).toLocaleString();
     document.getElementById("recordLine").textContent = (state.score >= saved.best) ? "New best!" : ("Best " + Math.round(saved.best).toLocaleString());
@@ -978,6 +1004,34 @@
   canvas.addEventListener("pointermove", updateAim);
   canvas.addEventListener("pointerdown", function(e){ ensureAudio(); updateAim(e); });
   canvas.addEventListener("pointerup", function(e){ updateAim(e); tryDrop(); });
+
+  // ---------- keyboard accessibility ----------
+  // The game was pointer/touch-only with no alternative input path — a real
+  // gap for anyone who can't use a mouse or touchscreen precisely. Arrow
+  // keys (or A/D) nudge the aim; Space or Enter drops. Guarded against any
+  // open overlay so keystrokes used to navigate a modal (e.g. Space on a
+  // focused button) don't also act on the game underneath it.
+  var OVERLAY_IDS = ["guideOverlay","achvOverlay","onboardOverlay","historyOverlay","gameOverOverlay"];
+  function anyOverlayOpen(){
+    return OVERLAY_IDS.some(function(id){ var el = document.getElementById(id); return el && !el.hidden; });
+  }
+  var AIM_KEY_STEP = 16;
+  window.addEventListener("keydown", function(e){
+    if (state.gameOver || anyOverlayOpen()) return;
+    if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A"){
+      ensureAudio();
+      state.aimX = Math.max(state.wallLeft+CARD_R, state.aimX - AIM_KEY_STEP);
+      e.preventDefault();
+    } else if (e.key === "ArrowRight" || e.key === "d" || e.key === "D"){
+      ensureAudio();
+      state.aimX = Math.min(state.wallRight-CARD_R, state.aimX + AIM_KEY_STEP);
+      e.preventDefault();
+    } else if (e.key === " " || e.key === "Enter"){
+      ensureAudio();
+      tryDrop();
+      e.preventDefault();
+    }
+  });
 
   // ---------- bonus draw ----------
   // The base drop flow never changes. Instead, an occasional "Bonus Draw"
@@ -1177,7 +1231,7 @@
     var fill = document.getElementById("pressureFill");
     var label = document.getElementById("pressurePct");
     if (fill) fill.style.width = pct + "%";
-    if (label) label.textContent = pct + "%";
+    if (label) label.textContent = zenMode ? "Zen" : (pct + "%");
   }
 
   function resize(){
@@ -1223,6 +1277,15 @@
     persistOnboarded();
   });
   if (needsOnboarding) document.getElementById("onboardOverlay").hidden = false;
+
+  // ---------- zen mode toggle ----------
+  var zenCheckbox = document.getElementById("zenToggle");
+  zenCheckbox.checked = zenMode;
+  zenCheckbox.addEventListener("change", function(){
+    zenMode = zenCheckbox.checked;
+    persistZen();
+    updatePressureBar();
+  });
 
   newGame(); resize(); requestAnimationFrame(loop);
 })();
