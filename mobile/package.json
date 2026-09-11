@@ -1,0 +1,21 @@
+{
+  "name": "handfall-mobile",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Capacitor wrapper packaging Handfall for the iOS App Store and Google Play.",
+  "scripts": {
+    "sync-web": "node scripts/sync-web.js",
+    "sync": "npm run sync-web && npx cap sync",
+    "open:ios": "npx cap open ios",
+    "open:android": "npx cap open android"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
+    "@capacitor/cli": "^7.0.0"
+  },
+  "dependencies": {
+    "@capacitor/android": "^7.0.0",
+    "@capacitor/core": "^7.0.0",
+    "@capacitor/ios": "^7.0.0"
+  }
+}

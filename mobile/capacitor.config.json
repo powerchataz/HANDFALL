@@ -1,0 +1,12 @@
+{
+  "appId": "com.powerchataz.handfall",
+  "appName": "Handfall",
+  "webDir": "www",
+  "backgroundColor": "#100e17",
+  "ios": {
+    "backgroundColor": "#100e17"
+  },
+  "android": {
+    "backgroundColor": "#100e17"
+  }
+}

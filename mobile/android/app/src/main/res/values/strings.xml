@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Handfall</string>
+    <string name="title_activity_main">Handfall</string>
+    <string name="package_name">com.powerchataz.handfall</string>
+    <string name="custom_url_scheme">com.powerchataz.handfall</string>
+</resources>

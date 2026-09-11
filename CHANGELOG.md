@@ -5,6 +5,25 @@ loosely follows [Keep a Changelog](https://keepachangelog.com/); this is a
 single-version prototype under active iteration rather than a versioned
 release train, so entries are grouped by date instead of a version number.
 
+## 2026-09-11 (continued)
+
+### Added
+
+- **Mobile app wrapper** (`mobile/`) — packages the game as a native iOS/
+  Android app via Capacitor, as a first step toward an App Store / Google
+  Play listing. Generated app icons and splash screens for both platforms
+  from the game's own brand mark, a `sync`/`sync-web` script that keeps the
+  wrapped copy from drifting out of sync with the real `index.html`, and a
+  CI check (`mobile-sync-check.yml`) that verifies the sync still succeeds
+  on every relevant push.
+- `privacy.html` — a plain-language privacy policy (required by both app
+  stores): the game collects nothing beyond a few `localStorage` keys that
+  never leave the device, so there was genuinely nothing to hide behind
+  boilerplate.
+- GitHub Pages confirmed live at https://powerchataz.github.io/HANDFALL/,
+  Source switched to GitHub Actions, and the `deploy-pages.yml` workflow
+  verified end-to-end with a real successful run.
+
 ## 2026-09-11
 
 ### Added

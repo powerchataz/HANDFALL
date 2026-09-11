@@ -31,6 +31,7 @@ jobs:
             .github/**
             tests/**
             .git/**
+            mobile/**
 
       - name: Deploy
         id: deployment

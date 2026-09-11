@@ -2,7 +2,7 @@
 
 A physics card-drop game: cards fall under gravity onto a table, and any 2–5 *touching* cards that form a valid poker hand (Match through Royal Flush) clear together for points. Clearing hands is your only real relief from the table overflowing — that tension between where you drop and what you're hoping to complete is the whole game.
 
-Play it by opening `index.html` in a browser. A GitHub Actions workflow (`.github/workflows/deploy-pages.yml`) auto-deploys `main` to GitHub Pages on every push — it just needs this repo's **Settings → Pages → Source** set to **GitHub Actions** once (a one-time repo-admin setting this workflow can't flip on its own); after that, the live URL is whatever GitHub Pages shows on that same settings page.
+Play it live at **https://powerchataz.github.io/HANDFALL/**, or open `index.html` directly in a browser. A GitHub Actions workflow (`.github/workflows/deploy-pages.yml`) auto-deploys `main` to that URL on every push.
 
 ## Controls
 
@@ -38,7 +38,11 @@ Unlike Zen, Hard Mode does **not** exclude a run from Best or achievements — i
 
 The game itself is a single self-contained `index.html` — vanilla JS + HTML5 Canvas 2D, no build step, no external libraries beyond Google Fonts. Procedural audio (Web Audio oscillators) and procedurally drawn cards — no image or sound assets. Progress (best score, achievements, run history, Zen/Hard toggle state, onboarding) persists via `localStorage`.
 
-A few small companion files round it out: `manifest.json` + `icon-512.png`/`apple-touch-icon.png` (installable as a home-screen app on mobile/desktop), `tests/smoke.js` — a headless-browser sanity check (page loads clean, onboarding dismisses, a drop registers, both toggles and the mute button engage, every modal opens and closes) that runs automatically on every push and pull request against `main` (`.github/workflows/smoke-test.yml`) — and `.github/workflows/deploy-pages.yml`, which publishes `main` to GitHub Pages on every push once Pages is pointed at GitHub Actions (see above).
+A few small companion files round it out: `manifest.json` + `icon-512.png`/`apple-touch-icon.png` (installable as a home-screen app on mobile/desktop), `privacy.html` (plain-language privacy policy — the short version is there's nothing to disclose, since nothing leaves the device), `tests/smoke.js` — a headless-browser sanity check (page loads clean, onboarding dismisses, a drop registers, both toggles and the mute button engage, every modal opens and closes) that runs automatically on every push and pull request against `main` (`.github/workflows/smoke-test.yml`) — and `.github/workflows/deploy-pages.yml`, which publishes `main` to GitHub Pages on every push.
+
+## Mobile app / store listing
+
+`mobile/` wraps this same game as a native iOS/Android app via Capacitor, as a first step toward App Store / Google Play listings. See `mobile/README.md` for the actual build workflow and, importantly, what's still a manual step outside any repo automation (developer accounts, code signing, store screenshots, review submission).
 
 ## Status
 
