@@ -444,7 +444,10 @@
   function randomCard(spamHeat, boardCards, excludeBlank){
     spamHeat = spamHeat || 0;
     boardCards = boardCards || [];
-    var jokerChance = spamHeat >= 2 ? 0 : JOKER_CHANCE * Math.max(0.1, 1 - spamHeat/2);
+    // Hard Mode halves the Joker rate outright — Jokers are a pure
+    // matching aid (wild substitution), so fewer of them raises baseline
+    // difficulty on top of the hazard events.
+    var jokerChance = spamHeat >= 2 ? 0 : JOKER_CHANCE * Math.max(0.1, 1 - spamHeat/2) * (hardMode ? 0.5 : 1);
     if (Math.random() < jokerChance) return { rank:-1, suit:-1, joker:true };
     if (hardMode && !excludeBlank && Math.random() < BLANK_CHANCE) return { rank:-2, suit:-2, blank:true };
     var attempts = spamHeat > 2 ? 14 : (spamHeat > 1 ? 7 : 1);
@@ -456,8 +459,11 @@
     // suppression starts well before heat maxes out, not only at the cap.
     // Named rankSuppressMode (not hardMode) to avoid colliding with the
     // module-level Hard Mode game-mode toggle of the same name used below —
-    // this is an unrelated, pre-existing anti-spam concept.
-    var rankSuppressMode = spamHeat >= 1.3;
+    // this is an unrelated, pre-existing anti-spam concept. Hard Mode
+    // lowers its own trigger threshold further (0.6 vs 1.3), so duplicate
+    // ranks — the raw material most matches are built from — get starved
+    // sooner under any real play pace, not just heavy spam.
+    var rankSuppressMode = spamHeat >= (hardMode ? 0.6 : 1.3);
     var card;
     for (var i=0;i<attempts;i++){
       card = { rank: Math.floor(Math.random()*13), suit: Math.floor(Math.random()*4), joker:false };
@@ -727,6 +733,7 @@
       dropSeq: 0,
       knifeReady: false, knifeTimer: 16 + Math.random()*16,
       fuseActive: false, fuseT: 0,
+      wireWobbleX: 0, wireWobbleVX: 0, lastAimForWire: LOGICAL_W/2,
       gameOver: false
     };
   }
@@ -805,7 +812,13 @@
   function spawnPopup(x,y,text,color){
     state.popups.push({ x:x, y:y, text:text, life:1.1, maxLife:1.1, color:color, vy:-38 });
   }
-  function triggerShake(mag){ state.shakeMag = Math.max(state.shakeMag, mag); state.shakeTime = 0.22; }
+  function triggerShake(mag){
+    state.shakeMag = Math.max(state.shakeMag, mag); state.shakeTime = 0.22;
+    // A flimsy wire visibly jolts when something nearby shakes the table —
+    // matches, the blank card's own blast, a knife impact — instead of
+    // reacting only to its own endpoint moving.
+    if (state.fuseActive) state.wireWobbleVX += (Math.random()-0.5) * mag * 26;
+  }
 
   // Blank card detonation: scatters nearby resting cards with an outward
   // physics impulse, and deletes a random few of them (capped at 3) with
@@ -949,7 +962,14 @@
     // busted a realistic 500-900ms-paced test run in 28s, which is not
     // spam, just playing at a normal clip. Only genuinely sustained,
     // bot-speed clicking keeps heat pinned this close to the cap.
-    var maxEvalSize = state.spamHeat >= 2.9 ? 2 : (state.spamHeat >= 2.5 ? 3 : 5);
+    // Hard Mode tightens these thresholds moderately (not back down to the
+    // 1.3/2.2 that was measured to unfairly bust normal-paced play in 28s
+    // — that's too extreme even for an opt-in hard mode) so eligible hand
+    // size shrinks earlier under real play, on top of the hazard events,
+    // rather than Hard Mode's difficulty coming only from fog/roulette/
+    // blank/knife with the underlying matching economy untouched.
+    var evalHigh = hardMode ? 2.5 : 2.9, evalLow = hardMode ? 2.1 : 2.5;
+    var maxEvalSize = state.spamHeat >= evalHigh ? 2 : (state.spamHeat >= evalLow ? 3 : 5);
     var adj = buildAdjacency(resting);
     var subsets = enumerateConnectedSubsets(adj, maxEvalSize);
     if (!subsets.length) return;
@@ -1123,12 +1143,26 @@
       // tries again, so it fires within a fraction of a second of fuseT
       // reaching 1, not necessarily the exact frame.
       if (!state.gameOver && state.queue[0] && state.queue[0].blank){
-        if (!state.fuseActive){ state.fuseActive = true; state.fuseT = 0; sfxFuseStart(); }
+        if (!state.fuseActive){ state.fuseActive = true; state.fuseT = 0; state.lastAimForWire = state.aimX; sfxFuseStart(); }
         state.fuseT += dt / FUSE_DURATION;
         if (state.fuseT >= 1) tryDrop();
+
+        // Flimsy wire physics: a lightweight spring-damper on a wobble
+        // offset, perturbed by the aim moving (the far end whips as it's
+        // dragged, like a loose wire under tension) and by triggerShake
+        // (see above). Deliberately under-damped so it overshoots and
+        // oscillates before settling — stiff/critically-damped would read
+        // as rigid, not flimsy.
+        var aimDelta = state.aimX - state.lastAimForWire;
+        state.wireWobbleVX += aimDelta * 0.8;
+        state.lastAimForWire = state.aimX;
+        state.wireWobbleVX += (0 - state.wireWobbleX) * 90 * dt;
+        state.wireWobbleVX *= 0.92;
+        state.wireWobbleX += state.wireWobbleVX * dt;
       } else {
         state.fuseActive = false;
         state.fuseT = 0;
+        state.wireWobbleX = 0; state.wireWobbleVX = 0;
       }
     } else {
       state.fogActive = false;
@@ -1550,8 +1584,11 @@
     // DOWN under its own weight, more so the further apart the ends are.
     var span = Math.abs(targetX - originX);
     var sag = 14 + span*0.16;
-    var wobble = Math.sin(state.elapsed*3.2) * 3;
-    var midX = (originX+targetX)/2 + wobble, midY = Math.max(originY, targetY) + sag;
+    var idleWobble = Math.sin(state.elapsed*3.2) * 2;
+    // Reactive wobble from the spring-damper in stepPhysics (aim drag +
+    // shake impulses) on top of a small idle sway, so it's never fully
+    // still even with no input.
+    var midX = (originX+targetX)/2 + idleWobble + state.wireWobbleX, midY = Math.max(originY, targetY) + sag;
 
     ctx.save();
     ctx.lineCap = "round";
@@ -1655,8 +1692,10 @@
       state.fogPuffs.forEach(function(puff){
         var px = groupX + puff.dx, py = fb.centerY + puff.dy;
         var grad = ctx.createRadialGradient(px, py, 0, px, py, puff.r);
-        grad.addColorStop(0, "rgba(206,200,220,0.4)");
-        grad.addColorStop(0.65, "rgba(206,200,220,0.22)");
+        // Bumped up per feedback — at 0.4 peak it read as too faint to
+        // actually reduce card visibility, just a decorative haze.
+        grad.addColorStop(0, "rgba(206,200,220,0.78)");
+        grad.addColorStop(0.6, "rgba(206,200,220,0.48)");
         grad.addColorStop(1, "rgba(206,200,220,0)");
         ctx.fillStyle = grad;
         ctx.beginPath();
