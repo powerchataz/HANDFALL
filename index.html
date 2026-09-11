@@ -235,7 +235,7 @@
 
   <label class="zen-toggle" for="hardToggle">
     <input type="checkbox" id="hardToggle">
-    <span>Hard mode &mdash; rare fog sweeps and a roulette hazard can strike</span>
+    <span>Hard mode &mdash; fog sweeps, roulette, and a rare blank card that detonates</span>
   </label>
 
   <div class="table-wrap">
@@ -404,6 +404,10 @@
     if (hit) tone(220, 0.35, { type: "square", gain: 0.18, slideTo: 55 });
     else tone(520, 0.12, { type: "sine", gain: 0.1, slideTo: 680 });
   }
+  function sfxBlank(){
+    tone(160, 0.28, { type: "sawtooth", gain: 0.2, slideTo: 40 });
+    tone(90, 0.35, { type: "square", gain: 0.14, slideTo: 30, delay: 0.03 });
+  }
 
   // ---------- cards ----------
   var RANKS = ["2","3","4","5","6","7","8","9","10","J","Q","K","A"];
@@ -419,6 +423,12 @@
 
   var JOKER_CHANCE = 0.04;
   var JOKER_BONUS = 150;
+  // Blank card: Hard-Mode-only hazard, opposite of the Joker — a rare card
+  // that detonates on landing, scattering and sometimes deleting nearby
+  // cards for zero points (see detonateBlank). Never appears in the Bonus
+  // Draw's picks (excludeBlank) — that window is deliberately "pure upside"
+  // per its own existing design, and a hazard card would contradict that.
+  var BLANK_CHANCE = 0.05;
   // The faster the player spams drops, the more "spam heat" builds. At high
   // heat the generator actively avoids handing out any rank+suit combo that
   // already exists ANYWHERE on the current board (not just recent drops) —
@@ -426,11 +436,12 @@
   // *something already on the table*, however long ago it landed. Starving
   // that supply during spam is what forces the pile to actually grow instead
   // of self-clearing indefinitely. Jokers are cut off entirely at max heat.
-  function randomCard(spamHeat, boardCards){
+  function randomCard(spamHeat, boardCards, excludeBlank){
     spamHeat = spamHeat || 0;
     boardCards = boardCards || [];
     var jokerChance = spamHeat >= 2 ? 0 : JOKER_CHANCE * Math.max(0.1, 1 - spamHeat/2);
     if (Math.random() < jokerChance) return { rank:-1, suit:-1, joker:true };
+    if (hardMode && !excludeBlank && Math.random() < BLANK_CHANCE) return { rank:-2, suit:-2, blank:true };
     var attempts = spamHeat > 2 ? 14 : (spamHeat > 1 ? 7 : 1);
     // Was spamHeat>=2 (== max heat only). Heat ramps up fast under
     // continuous clicking (+0.4/drop, cap 3) but decays slowly (-0.45/s),
@@ -438,12 +449,15 @@
     // and kept getting fed fresh rank-dupes the whole time — the exact
     // supply that fuels reflexive Pair/Trip/Flush clearing. Lowered so
     // suppression starts well before heat maxes out, not only at the cap.
-    var hardMode = spamHeat >= 1.3;
+    // Named rankSuppressMode (not hardMode) to avoid colliding with the
+    // module-level Hard Mode game-mode toggle of the same name used below —
+    // this is an unrelated, pre-existing anti-spam concept.
+    var rankSuppressMode = spamHeat >= 1.3;
     var card;
     for (var i=0;i<attempts;i++){
       card = { rank: Math.floor(Math.random()*13), suit: Math.floor(Math.random()*4), joker:false };
       var exactDupe = boardCards.some(function(c){ return c.rank===card.rank && c.suit===card.suit; });
-      var rankDupe = hardMode && boardCards.some(function(c){ return c.rank===card.rank; });
+      var rankDupe = rankSuppressMode && boardCards.some(function(c){ return c.rank===card.rank; });
       if (!exactDupe && !rankDupe) break;
     }
     return card;
@@ -746,7 +760,7 @@
   function currentMult(){ return (1 + state.cascadeMult) * legacyMultiplier(); }
 
   function spawnBall(card, x, y){
-    state.balls.push({ x:x, y:y, vx:0, vy:0, r:CARD_R, rank:card.rank, suit:card.suit, joker:!!card.joker, rot:(Math.random()-0.5)*0.2, angv:(Math.random()-0.5)*0.4, restTime:0 });
+    state.balls.push({ x:x, y:y, vx:0, vy:0, r:CARD_R, rank:card.rank, suit:card.suit, joker:!!card.joker, blank:!!card.blank, detonated:false, rot:(Math.random()-0.5)*0.2, angv:(Math.random()-0.5)*0.4, restTime:0 });
   }
   function spawnParticles(x,y,color,n){
     for (var i=0;i<n;i++){
@@ -758,6 +772,38 @@
     state.popups.push({ x:x, y:y, text:text, life:1.1, maxLife:1.1, color:color, vy:-38 });
   }
   function triggerShake(mag){ state.shakeMag = Math.max(state.shakeMag, mag); state.shakeTime = 0.22; }
+
+  // Blank card detonation: scatters nearby resting cards with an outward
+  // physics impulse, and deletes a random few of them (capped at 3) with
+  // ZERO points awarded — this is never a shortcut to relief, only a risk.
+  // It can occasionally thin out a dangerous pile by chance, but just as
+  // easily deletes a card the player needed for a match they were setting
+  // up; net effect is deliberately a coin flip, not a benefit.
+  var BLANK_RADIUS = 85;
+  function detonateBlank(bomb){
+    var affected = state.balls.filter(function(b){
+      if (b === bomb) return false;
+      var dx=b.x-bomb.x, dy=b.y-bomb.y;
+      return Math.sqrt(dx*dx+dy*dy) < BLANK_RADIUS;
+    });
+    var toDelete = [];
+    affected.forEach(function(b){
+      var dx=b.x-bomb.x, dy=b.y-bomb.y;
+      var dist = Math.sqrt(dx*dx+dy*dy) || 1;
+      var nx=dx/dist, ny=dy/dist;
+      var force = 220 * (1 - dist/BLANK_RADIUS);
+      b.vx += nx*force; b.vy += ny*force - 60;
+      if (toDelete.length < 3 && Math.random() < 0.4) toDelete.push(b);
+    });
+    spawnParticles(bomb.x, bomb.y, "rgb(180,175,190)", 22);
+    triggerShake(8);
+    sfxBlank();
+    showToast(toDelete.length
+      ? "💥 Blank card detonates — " + toDelete.length + " card" + (toDelete.length>1?"s":"") + " lost"
+      : "💥 Blank card detonates");
+    var removeSet = toDelete.concat([bomb]);
+    state.balls = state.balls.filter(function(b){ return removeSet.indexOf(b) === -1; });
+  }
 
   // ---------- match finding ----------
   // Cards are matched as small (2-5 card) connected subgroups, found *within*
@@ -989,6 +1035,20 @@
       rb.restTime = spd < REST_SPEED ? rb.restTime + dt : 0;
     }
 
+    // A blank card detonates the instant it first settles (restTime just
+    // became positive) — well before MIN_REST_TIME, so it never lingers
+    // long enough to be swept into a match evaluation. Iterate a snapshot,
+    // not the live array — detonateBlank reassigns state.balls, so in the
+    // rare case two blank cards settle the same frame (one's blast could
+    // also remove the other), mutating mid-loop would skip entries.
+    var blankCandidates = state.balls.filter(function(b){ return b.blank && !b.detonated && b.restTime > 0; });
+    for (var qi=0; qi<blankCandidates.length; qi++){
+      var qb = blankCandidates[qi];
+      if (qb.detonated || state.balls.indexOf(qb) === -1) continue;
+      qb.detonated = true;
+      detonateBlank(qb);
+    }
+
     resolveHands(dt);
 
     // Danger is a position check, not a velocity check — whether a card's
@@ -1146,7 +1206,7 @@
   function triggerBonusWindow(){
     state.bonusActive = true;
     state.bonusTimeLeft = BONUS_WINDOW;
-    state.bonusChoices = [randomCard(), randomCard(), randomCard()];
+    state.bonusChoices = [randomCard(0,[],true), randomCard(0,[],true), randomCard(0,[],true)];
     renderBonusPicker();
     document.getElementById("bonusPanel").hidden = false;
     showToast("✨ Bonus Draw — pick one!");
@@ -1206,6 +1266,19 @@
       ctx.textAlign = "center"; ctx.textBaseline = "middle";
       ctx.font = Math.round(b.r*0.9) + "px system-ui, sans-serif";
       ctx.fillText("🃏", 0, b.r*0.05);
+      ctx.restore();
+      return;
+    }
+
+    if (b.blank){
+      var bg = ctx.createLinearGradient(-s/2,-s/2,s/2,s/2);
+      bg.addColorStop(0, "#2a2230"); bg.addColorStop(1, "#14101c");
+      ctx.fillStyle = bg; ctx.fill();
+      ctx.lineWidth = 1.8; ctx.strokeStyle = "rgba(239,77,94,0.7)"; ctx.stroke();
+      ctx.fillStyle = "rgba(239,77,94,0.85)";
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.font = Math.round(b.r*0.85) + "px system-ui, sans-serif";
+      ctx.fillText("💣", 0, b.r*0.05);
       ctx.restore();
       return;
     }
