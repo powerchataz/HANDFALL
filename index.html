@@ -4,6 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Handfall</title>
+<meta name="description" content="A physics card-drop game: cards fall under gravity onto a table, and any touching cards that form a poker hand clear together for points. Optional Zen practice mode and Hard Mode hazards.">
+<meta name="theme-color" content="#100e17">
+<meta property="og:title" content="Handfall">
+<meta property="og:description" content="A physics card-drop poker-matching game — drop, connect a hand, clear it before the felt overflows.">
+<meta property="og:type" content="website">
+<link rel="icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+CiAgPGRlZnM+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9ImciIHgxPSIwIiB5MT0iMCIgeDI9IjEiIHkyPSIxIj4KICAgICAgPHN0b3Agb2Zmc2V0PSIwIiBzdG9wLWNvbG9yPSIjZmZmM2Q2Ii8+CiAgICAgIDxzdG9wIG9mZnNldD0iMC41NSIgc3RvcC1jb2xvcj0iI2YwYTYzYSIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiNlMDUxOGMiLz4KICAgIDwvbGluZWFyR3JhZGllbnQ+CiAgPC9kZWZzPgogIDxyZWN0IHg9IjQiIHk9IjQiIHdpZHRoPSI1NiIgaGVpZ2h0PSI1NiIgcng9IjE0IiBmaWxsPSIjMWIxODI2Ii8+CiAgPHJlY3QgeD0iOSIgeT0iOSIgd2lkdGg9IjQ2IiBoZWlnaHQ9IjQ2IiByeD0iMTAiIGZpbGw9InVybCgjZykiLz4KICA8cGF0aCBkPSJNMzIgMTYgQzQwIDI1IDQ3IDMwIDQ3IDM4IEM0NyA0NCA0MiA0OCAzNyA0Ni41IEMzNS41IDQ2IDM0LjUgNDQuNSAzNCA0MyBDMzQgNDcgMzUuNSA0OSAzOCA1MC41IEwyNiA1MC41IEMyOC41IDQ5IDMwIDQ3IDMwIDQzIEMyOS41IDQ0LjUgMjguNSA0NiAyNyA0Ni41IEMyMiA0OCAxNyA0NCAxNyAzOCBDMTcgMzAgMjQgMjUgMzIgMTYgWiIgZmlsbD0iIzI0MWEyZSIvPgo8L3N2Zz4K">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700;800&family=Manrope:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
@@ -191,7 +197,8 @@
   .score-row .rec{ font-size:11px; color:var(--teal); font-family:'Space Mono',monospace; letter-spacing:.04em; }
   .modal .go{ width:100%; background:linear-gradient(90deg,var(--amber),var(--magenta)); border:none; color:#1a1220; font-family:'Unbounded',sans-serif; font-weight:700; font-size:14px; padding:13px; border-radius:10px; cursor:pointer; }
   .modal .go:focus-visible{ outline:2px solid var(--ink); outline-offset:2px; }
-
+</head>
+<body>
   .toast{
     /* Fixed + z-index above .overlay (10): an achievement toast can fire at
        the exact moment a bust shows the Game Over modal (Marathon/Collector
@@ -203,8 +210,7 @@
     border-radius:999px; opacity:0; transition:opacity .25s ease, transform .25s ease; pointer-events:none; white-space:nowrap;
   }
   .toast.show{opacity:1; transform:translate(-50%,0);}
-</head>
-<body>
+
   @media (prefers-reduced-motion: reduce){ .toast{transition:none;} }
 </style>
 
@@ -240,7 +246,7 @@
 
   <div class="table-wrap">
     <canvas id="game" width="340" height="560" role="img" aria-label="Handfall play field"></canvas>
-    <div class="toast" id="toast"></div>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
   </div>
 
   <div class="bonus-panel" id="bonusPanel" hidden aria-label="Bonus draw — pick a card before time runs out">
