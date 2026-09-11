@@ -36,7 +36,9 @@ Unlike Zen, Hard Mode does **not** exclude a run from Best or achievements — i
 
 ## Tech
 
-Single self-contained `index.html`. Vanilla JS + HTML5 Canvas 2D, no build step, no external libraries beyond Google Fonts. Procedural audio (Web Audio oscillators) and procedurally drawn cards — no image or sound assets. Progress (best score, achievements, run history, Zen/Hard toggle state, onboarding) persists via `localStorage`.
+The game itself is a single self-contained `index.html` — vanilla JS + HTML5 Canvas 2D, no build step, no external libraries beyond Google Fonts. Procedural audio (Web Audio oscillators) and procedurally drawn cards — no image or sound assets. Progress (best score, achievements, run history, Zen/Hard toggle state, onboarding) persists via `localStorage`.
+
+A few small companion files round it out: `manifest.json` + `icon-512.png`/`apple-touch-icon.png` (installable as a home-screen app on mobile/desktop), and `tests/smoke.js`, a headless-browser sanity check (page loads clean, onboarding dismisses, a drop registers, both toggles engage, every modal opens and closes) that runs automatically in CI (`.github/workflows/smoke-test.yml`) on every push and pull request against `main`.
 
 ## Status
 
