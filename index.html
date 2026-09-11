@@ -235,7 +235,7 @@
 
   <label class="zen-toggle" for="hardToggle">
     <input type="checkbox" id="hardToggle">
-    <span>Hard mode &mdash; a rare fog sweep occasionally obscures the pile</span>
+    <span>Hard mode &mdash; rare fog sweeps and a roulette hazard can strike</span>
   </label>
 
   <div class="table-wrap">
@@ -400,6 +400,10 @@
   }
   function sfxAchv(){ [0,1,2].forEach(function(i){ tone(360 + i*140, 0.13, { type:"square", gain:0.09, delay:i*0.06 }); }); }
   function sfxGameOver(){ tone(300, 0.6, { type: "sawtooth", gain: 0.16, slideTo: 60 }); }
+  function sfxRoulette(hit){
+    if (hit) tone(220, 0.35, { type: "square", gain: 0.18, slideTo: 55 });
+    else tone(520, 0.12, { type: "sine", gain: 0.1, slideTo: 680 });
+  }
 
   // ---------- cards ----------
   var RANKS = ["2","3","4","5","6","7","8","9","10","J","Q","K","A"];
@@ -698,6 +702,8 @@
       zenEverUsed: false,
       hardEverUsed: false,
       fogActive: false, fogT: 0, fogDuration: 3.5, fogTimer: 14 + Math.random()*14,
+      rouletteSpinning: false, rouletteSpinT: 0, rouletteTimer: 18 + Math.random()*18,
+      rouletteFlashTimer: 0, rouletteFlashHit: false,
       gameOver: false
     };
   }
@@ -711,6 +717,12 @@
   // skilled/spam play being able to suppress it indefinitely is the exact
   // "can't lose" failure mode this session spent most of its effort on).
   var SHIELD_DURATION = 1.0;
+
+  // Hard Mode roulette tuning — see stepPhysics for the logic.
+  var ROULETTE_SPIN_DURATION = 1.6;
+  var ROULETTE_HIT_CHANCE = 0.18;
+  var ROULETTE_MIN_INTERVAL = 20;
+  var ROULETTE_MAX_INTERVAL = 44;
 
   // ---------- difficulty escalation ----------
   // Nothing about the base drop flow scales with time, so a player who
@@ -895,8 +907,40 @@
         state.fogTimer -= dt;
         if (state.fogTimer <= 0){ state.fogActive = true; state.fogT = 0; state.fogDuration = 3 + Math.random()*2; }
       }
+
+      // Roulette: a second, independent rare event — pure hazard, no
+      // upside. A brief suspenseful "spin" resolves to safe (~82% of the
+      // time, nothing happens) or a hit (~18%: a real but modest penalty —
+      // a danger-timer jolt plus one unplanned extra card). Runs on its own
+      // timer, separate from fog, so the two don't have to coincide.
+      if (state.rouletteSpinning){
+        state.rouletteSpinT += dt;
+        if (state.rouletteSpinT >= ROULETTE_SPIN_DURATION){
+          state.rouletteSpinning = false;
+          var hit = Math.random() < ROULETTE_HIT_CHANCE;
+          state.rouletteFlashHit = hit;
+          state.rouletteFlashTimer = 0.6;
+          if (hit){
+            state.dangerTimer += 0.4;
+            var rx = state.wallLeft + CARD_R + Math.random() * ((state.wallRight - CARD_R) - (state.wallLeft + CARD_R));
+            var rBoard = state.balls.filter(function(b){ return !b.joker; }).map(function(b){ return { rank:b.rank, suit:b.suit }; });
+            spawnBall(randomCard(state.spamHeat, rBoard), rx, state.dangerY - CARD_R - 6);
+            triggerShake(6);
+            sfxRoulette(true);
+            showToast("🎯 Roulette hits — the felt tilts");
+          } else {
+            sfxRoulette(false);
+          }
+          state.rouletteTimer = ROULETTE_MIN_INTERVAL + Math.random() * (ROULETTE_MAX_INTERVAL - ROULETTE_MIN_INTERVAL);
+        }
+      } else {
+        state.rouletteTimer -= dt;
+        if (state.rouletteTimer <= 0){ state.rouletteSpinning = true; state.rouletteSpinT = 0; }
+      }
+      if (state.rouletteFlashTimer > 0) state.rouletteFlashTimer -= dt;
     } else {
       state.fogActive = false;
+      state.rouletteSpinning = false;
     }
 
     var pT = pressureT();
@@ -1247,6 +1291,35 @@
       ctx.fillRect(fogCenterX-fogW/2, state.dangerY-14, fogW, state.floorY-(state.dangerY-14));
     }
 
+    if (hardMode && (state.rouletteSpinning || state.rouletteFlashTimer > 0)){
+      // Suspense indicator in the top-left corner (mirrors NEXT in the
+      // top-right, so the two never overlap) — a pulsing "?" while
+      // spinning, then a quick colored ring on resolution: red for a hit,
+      // teal for safe. No text explaining which it'll be in advance —
+      // that's the point.
+      var rx2 = state.wallLeft + 24, ry2 = state.dangerY - 34;
+      if (state.rouletteSpinning){
+        var pulse = 0.5 + 0.5*Math.sin(state.rouletteSpinT*14);
+        ctx.save();
+        ctx.globalAlpha = 0.55 + pulse*0.35;
+        ctx.fillStyle = "rgba(239,77,94,0.9)";
+        ctx.beginPath(); ctx.arc(rx2, ry2, 9+pulse*2, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = "#1a1220";
+        ctx.font = "700 11px 'Space Mono', monospace";
+        ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.fillText("?", rx2, ry2+0.5);
+        ctx.restore();
+      } else if (state.rouletteFlashTimer > 0){
+        var fa = Math.max(0, state.rouletteFlashTimer/0.6);
+        ctx.save();
+        ctx.globalAlpha = fa;
+        ctx.strokeStyle = state.rouletteFlashHit ? "rgba(239,77,94,0.9)" : "rgba(62,207,142,0.9)";
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(rx2, ry2, 9+(1-fa)*14, 0, Math.PI*2); ctx.stroke();
+        ctx.restore();
+      }
+    }
+
     state.particles.forEach(function(pt){
       var a = Math.max(0, pt.life/pt.maxLife);
       ctx.fillStyle = pt.color.replace("rgb(", "rgba(").replace(")", "," + (a*0.85) + ")");
@@ -1368,7 +1441,7 @@
   hardCheckbox.addEventListener("change", function(){
     hardMode = hardCheckbox.checked;
     persistHard();
-    if (!hardMode && state) state.fogActive = false;
+    if (!hardMode && state){ state.fogActive = false; state.rouletteSpinning = false; }
   });
 
   newGame(); resize(); requestAnimationFrame(loop);
