@@ -190,7 +190,11 @@
   .modal .go:focus-visible{ outline:2px solid var(--ink); outline-offset:2px; }
 
   .toast{
-    position:absolute; top:8px; left:50%; transform:translate(-50%,-8px);
+    /* Fixed + z-index above .overlay (10): an achievement toast can fire at
+       the exact moment a bust shows the Game Over modal (Marathon/Collector
+       are checked in triggerGameOver) — as position:absolute inside
+       .table-wrap it was rendering invisibly behind that overlay. */
+    position:fixed; top:14px; left:50%; transform:translate(-50%,-8px); z-index:20;
     background:rgba(20,15,28,.94); border:1px solid var(--gold-line); color:var(--amber);
     font-family:'Space Mono',monospace; font-size:11px; letter-spacing:.03em; padding:6px 12px;
     border-radius:999px; opacity:0; transition:opacity .25s ease, transform .25s ease; pointer-events:none; white-space:nowrap;
