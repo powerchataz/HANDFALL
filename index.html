@@ -433,7 +433,11 @@
   // cards for zero points (see detonateBlank). Never appears in the Bonus
   // Draw's picks (excludeBlank) — that window is deliberately "pure upside"
   // per its own existing design, and a hazard card would contradict that.
-  var BLANK_CHANCE = 0.05;
+  // Lowered per feedback — was appearing roughly every 20-40 drops of
+  // sustained play, too frequent for a hazard with zero upside. Still
+  // clearly more common than the knife (a per-drop chance vs. the knife's
+  // ~55-110s independent timer), just less relentless.
+  var BLANK_CHANCE = 0.02;
   // The faster the player spams drops, the more "spam heat" builds. At high
   // heat the generator actively avoids handing out any rank+suit combo that
   // already exists ANYWHERE on the current board (not just recent drops) —
@@ -731,7 +735,7 @@
       rouletteSpinning: false, rouletteSpinT: 0, rouletteTimer: 18 + Math.random()*18,
       rouletteFlashTimer: 0, rouletteFlashHit: false,
       dropSeq: 0,
-      knifeReady: false, knifeTimer: 16 + Math.random()*16,
+      knifeReady: false, knifeTimer: KNIFE_MIN_INTERVAL + Math.random()*(KNIFE_MAX_INTERVAL-KNIFE_MIN_INTERVAL),
       fuseActive: false, fuseT: 0,
       wireWobbleX: 0, wireWobbleVX: 0, lastAimForWire: LOGICAL_W/2,
       wireEmberTimer: 0,
@@ -762,8 +766,12 @@
   // overlapping. They CAN all fire at once — the low joint probability
   // that keeps that "very rare together" is just the natural product of
   // each being independently rare, not an explicit anti-stacking rule.
-  var KNIFE_MIN_INTERVAL = 16;
-  var KNIFE_MAX_INTERVAL = 38;
+  // Raised substantially per feedback — the knife should be the rarest of
+  // the four hazards by a clear margin, not just another one on the same
+  // ~16-38s cadence as fog/roulette. ~55-110s (avg ~82s) puts real space
+  // between one appearance and the next, even under sustained play.
+  var KNIFE_MIN_INTERVAL = 55;
+  var KNIFE_MAX_INTERVAL = 110;
   var KNIFE_MIN_FALL_DISTANCE = 40;
   // Real safety margin below the danger line, checked directly against
   // state.dangerY at pin time (not an indirect fall-distance guess — see
