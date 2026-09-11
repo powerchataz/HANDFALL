@@ -235,7 +235,7 @@
 
   <label class="zen-toggle" for="hardToggle">
     <input type="checkbox" id="hardToggle">
-    <span>Hard mode &mdash; fog, roulette, a detonating blank card, and a knife that pins a dropped card in place</span>
+    <span>Hard mode &mdash; fog, roulette, a fused blank card that detonates, and a knife that pins a dropped card in place</span>
   </label>
 
   <div class="table-wrap">
@@ -412,6 +412,7 @@
     tone(900, 0.06, { type: "triangle", gain: 0.16, slideTo: 200 });
     tone(150, 0.1, { type: "square", gain: 0.12, slideTo: 60, delay: 0.05 });
   }
+  function sfxFuseStart(){ tone(700, 0.08, { type: "square", gain: 0.12, slideTo: 950 }); }
 
   // ---------- cards ----------
   var RANKS = ["2","3","4","5","6","7","8","9","10","J","Q","K","A"];
@@ -720,10 +721,12 @@
       zenEverUsed: false,
       hardEverUsed: false,
       fogActive: false, fogT: 0, fogDuration: 3.5, fogTimer: 14 + Math.random()*14,
+      fogBand: null, fogPuffs: [],
       rouletteSpinning: false, rouletteSpinT: 0, rouletteTimer: 18 + Math.random()*18,
       rouletteFlashTimer: 0, rouletteFlashHit: false,
       dropSeq: 0,
       knifeReady: false, knifeTimer: 16 + Math.random()*16,
+      fuseActive: false, fuseT: 0,
       gameOver: false
     };
   }
@@ -752,6 +755,15 @@
   // each being independently rare, not an explicit anti-stacking rule.
   var KNIFE_MIN_INTERVAL = 16;
   var KNIFE_MAX_INTERVAL = 38;
+  var KNIFE_MIN_FALL_DISTANCE = 40;
+
+  // Blank card fuse: when the blank card is up next to drop (queue[0]), a
+  // wire visibly sparks and creeps toward it — the player can still drop it
+  // themselves at a moment/position of their choosing, but if the fuse
+  // burns all the way down first, it auto-drops at whatever the aim
+  // currently is. Gives advance warning instead of the blank card being a
+  // silent surprise mixed invisibly into the queue.
+  var FUSE_DURATION = 4.5;
 
   // ---------- difficulty escalation ----------
   // Nothing about the base drop flow scales with time, so a player who
@@ -776,7 +788,7 @@
 
   function spawnBall(card, x, y){
     state.dropSeq++;
-    state.balls.push({ x:x, y:y, vx:0, vy:0, r:CARD_R, rank:card.rank, suit:card.suit, joker:!!card.joker, blank:!!card.blank, detonated:false, pinned:false, seq:state.dropSeq, rot:(Math.random()-0.5)*0.2, angv:(Math.random()-0.5)*0.4, restTime:0 });
+    state.balls.push({ x:x, y:y, vx:0, vy:0, r:CARD_R, rank:card.rank, suit:card.suit, joker:!!card.joker, blank:!!card.blank, detonated:false, pinned:false, seq:state.dropSeq, spawnY:y, rot:(Math.random()-0.5)*0.2, angv:(Math.random()-0.5)*0.4, restTime:0 });
   }
   function spawnParticles(x,y,color,n){
     for (var i=0;i<n;i++){
@@ -836,6 +848,38 @@
     triggerShake(4);
     sfxKnife();
     showToast("🔪 A card gets pinned in place");
+  }
+
+  // Rolls a fresh, irregular fog shape + a random section of the board for
+  // it to drift across — called once each time a fog sweep starts (not
+  // every frame), so the "randomly shaped" cloud stays a consistent shape
+  // while it drifts rather than reshuffling every tick. Replaces an earlier
+  // version that was a flat linear-gradient rectangle — real playtesting
+  // called it out as reading like "a beam of light," not fog: no irregular
+  // shape, always the same width, always spanning the full playfield
+  // height. This version picks a random vertical band (not always full
+  // height) and a random horizontal stretch of the table (not always a
+  // full-width sweep), then scatters several overlapping soft blobs within
+  // that band to build an actual irregular cloud silhouette.
+  function rollFogShape(){
+    var innerTop = state.dangerY + 16, innerBottom = state.floorY - 10;
+    var bandHeight = 70 + Math.random()*70;
+    var maxCenterY = Math.max(innerTop + bandHeight/2 + 1, innerBottom - bandHeight/2);
+    var centerY = innerTop + bandHeight/2 + Math.random() * Math.max(1, maxCenterY - (innerTop + bandHeight/2));
+    var tableWidth = state.wallRight - state.wallLeft;
+    var travel = Math.min(tableWidth * (0.5 + Math.random()*0.4), tableWidth + 60);
+    var startX = state.wallLeft - 30 + Math.random() * Math.max(1, (tableWidth + 60) - travel);
+    state.fogBand = { centerY: centerY, height: bandHeight, startX: startX, travel: travel };
+    var puffCount = 6 + Math.floor(Math.random()*4);
+    var puffs = [];
+    for (var fp=0; fp<puffCount; fp++){
+      puffs.push({
+        dx: (Math.random()-0.5) * bandHeight * 1.1,
+        dy: (Math.random()-0.5) * bandHeight * 0.55,
+        r: bandHeight * (0.28 + Math.random()*0.24)
+      });
+    }
+    state.fogPuffs = puffs;
   }
 
   // ---------- match finding ----------
@@ -984,7 +1028,10 @@
         if (state.fogT >= 1){ state.fogActive = false; state.fogT = 0; state.fogTimer = 16 + Math.random()*18; }
       } else {
         state.fogTimer -= dt;
-        if (state.fogTimer <= 0){ state.fogActive = true; state.fogT = 0; state.fogDuration = 3 + Math.random()*2; }
+        if (state.fogTimer <= 0){
+          state.fogActive = true; state.fogT = 0; state.fogDuration = 3 + Math.random()*2.5;
+          rollFogShape();
+        }
       }
 
       // Roulette: a second, independent rare event — pure hazard, no
@@ -1023,8 +1070,19 @@
       // in flight — instant the moment one exists, since most drops are
       // airborne only briefly. No visual telegraph before it happens; the
       // suddenness is the point (unlike roulette's deliberate suspense).
+      //
+      // Bug found in real play: a card also spawns with vx=vy=0, so
+      // restTime<MIN_REST_TIME was already true at the exact instant of
+      // spawn — the knife could pin a card essentially AT its spawn point,
+      // right where drops originate (at/near the danger line), before it
+      // had visibly fallen at all. That's not "a card being dropped", and
+      // pinning it there could force an unfair, near-immediate bust.
+      // Requiring real fall distance from spawnY ensures the card was
+      // actually seen in motion first.
       if (state.knifeReady){
-        var inFlight = state.balls.filter(function(b){ return !b.pinned && !b.blank && b.restTime < MIN_REST_TIME; });
+        var inFlight = state.balls.filter(function(b){
+          return !b.pinned && !b.blank && b.restTime < MIN_REST_TIME && (b.y - b.spawnY) >= KNIFE_MIN_FALL_DISTANCE;
+        });
         if (inFlight.length){
           var target = inFlight[0];
           for (var ki=1; ki<inFlight.length; ki++){ if (inFlight[ki].seq > target.seq) target = inFlight[ki]; }
@@ -1036,10 +1094,26 @@
         state.knifeTimer -= dt;
         if (state.knifeTimer <= 0) state.knifeReady = true;
       }
+
+      // Blank card fuse: active exactly while the up-next card is blank.
+      // Force-dropping just calls tryDrop() — if dropCooldown is still
+      // ticking down that tick, it's a harmless no-op and the next tick
+      // tries again, so it fires within a fraction of a second of fuseT
+      // reaching 1, not necessarily the exact frame.
+      if (!state.gameOver && state.queue[0] && state.queue[0].blank){
+        if (!state.fuseActive){ state.fuseActive = true; state.fuseT = 0; sfxFuseStart(); }
+        state.fuseT += dt / FUSE_DURATION;
+        if (state.fuseT >= 1) tryDrop();
+      } else {
+        state.fuseActive = false;
+        state.fuseT = 0;
+      }
     } else {
       state.fogActive = false;
       state.rouletteSpinning = false;
       state.knifeReady = false;
+      state.fuseActive = false;
+      state.fuseT = 0;
     }
 
     var pT = pressureT();
@@ -1098,13 +1172,20 @@
       rb.restTime = spd < REST_SPEED ? rb.restTime + dt : 0;
     }
 
-    // A blank card detonates the instant it first settles (restTime just
-    // became positive) — well before MIN_REST_TIME, so it never lingers
-    // long enough to be swept into a match evaluation. Iterate a snapshot,
-    // not the live array — detonateBlank reassigns state.balls, so in the
-    // rare case two blank cards settle the same frame (one's blast could
-    // also remove the other), mutating mid-loop would skip entries.
-    var blankCandidates = state.balls.filter(function(b){ return b.blank && !b.detonated && b.restTime > 0; });
+    // A blank card detonates once it genuinely settles — requires
+    // restTime >= MIN_REST_TIME (the same threshold match-eligibility
+    // uses), NOT just restTime > 0. Bug found in real play: every fresh
+    // drop spawns with vx=vy=0, which is already "< REST_SPEED" on frame
+    // one, before gravity has accelerated it at all — restTime > 0 was
+    // true immediately at spawn, so the blank card detonated on the spot
+    // instead of ever falling ("implodes and never drops"). Requiring the
+    // full MIN_REST_TIME window means it must have actually been slow
+    // continuously for that long — gravity pushes a freshly spawned card's
+    // speed past REST_SPEED within ~0.1s either way, resetting restTime to
+    // 0 during the real fall, so this only fires once it truly lands.
+    // Still guaranteed to detonate in the same tick it would otherwise
+    // become match-eligible, since this check runs before resolveHands.
+    var blankCandidates = state.balls.filter(function(b){ return b.blank && !b.detonated && b.restTime >= MIN_REST_TIME; });
     for (var qi=0; qi<blankCandidates.length; qi++){
       var qb = blankCandidates[qi];
       if (qb.detonated || state.balls.indexOf(qb) === -1) continue;
@@ -1334,11 +1415,26 @@
     }
 
     if (b.blank){
+      // Bug found in real play: the old gradient's dark stop (#14101c) was
+      // nearly identical to the canvas background fill (#140f1c) — the
+      // card visually vanished into the background instead of reading as
+      // black. True near-black now, plus a bright rim and a glint
+      // highlight so it unmistakably reads as a solid, distinct object.
       var bg = ctx.createLinearGradient(-s/2,-s/2,s/2,s/2);
-      bg.addColorStop(0, "#2a2230"); bg.addColorStop(1, "#14101c");
+      bg.addColorStop(0, "#3a3a42"); bg.addColorStop(0.4, "#0c0c0f"); bg.addColorStop(1, "#000000");
       ctx.fillStyle = bg; ctx.fill();
-      ctx.lineWidth = 1.8; ctx.strokeStyle = "rgba(239,77,94,0.7)"; ctx.stroke();
-      ctx.fillStyle = "rgba(239,77,94,0.85)";
+      ctx.lineWidth = 2.2; ctx.strokeStyle = "rgba(239,77,94,0.9)"; ctx.stroke();
+      // Glint highlight — a small bright streak, cartoon-metal style.
+      ctx.save();
+      ctx.beginPath();
+      roundRectPath(-s/2, -s/2*1.28, s, s*1.28, s*0.15);
+      ctx.clip();
+      ctx.fillStyle = "rgba(255,255,255,0.22)";
+      ctx.beginPath();
+      ctx.ellipse(-s*0.18, -s*0.32, s*0.1, s*0.28, -0.5, 0, Math.PI*2);
+      ctx.fill();
+      ctx.restore();
+      ctx.fillStyle = "rgba(239,77,94,0.95)";
       ctx.textAlign = "center"; ctx.textBaseline = "middle";
       ctx.font = Math.round(b.r*0.85) + "px system-ui, sans-serif";
       ctx.fillText("💣", 0, b.r*0.05);
@@ -1369,13 +1465,37 @@
     ctx.fillText(RANKS[b.rank], -s/2 + b.r*0.12, -s/2*1.28 + b.r*0.1);
 
     if (b.pinned){
-      // Knife overlay — drawn on top of the normal face, doesn't cover the
-      // rank/suit so the card is still identifiable, just visibly stuck.
+      // Knife overlay — a drawn blade + handle, not a flat emoji, for a
+      // cartoony-3D beveled look: a metallic gradient across the blade
+      // (dark-bright-dark, like a rounded bevel catching light) and a
+      // wood-tone gradient handle, plus a small impact shadow where the
+      // tip meets the card. Doesn't cover the rank/suit, so the card is
+      // still identifiable, just visibly stuck.
       ctx.save();
-      ctx.rotate(-0.55);
-      ctx.font = Math.round(b.r*0.85) + "px system-ui, sans-serif";
-      ctx.textAlign = "center"; ctx.textBaseline = "middle";
-      ctx.fillText("🔪", s/2*0.55, -s/2*0.55);
+      ctx.translate(s*0.08, -s*0.05);
+      ctx.rotate(-0.62);
+      var bladeLen = b.r*1.05, bladeW = b.r*0.3;
+
+      ctx.fillStyle = "rgba(20,15,10,0.35)";
+      ctx.beginPath(); ctx.ellipse(0, bladeLen*0.05, bladeW*0.9, bladeW*0.4, 0, 0, Math.PI*2); ctx.fill();
+
+      var handleGrad = ctx.createLinearGradient(-bladeW*0.55,0,bladeW*0.55,0);
+      handleGrad.addColorStop(0,"#3d1e0f"); handleGrad.addColorStop(0.5,"#8a4a26"); handleGrad.addColorStop(1,"#2a1409");
+      ctx.fillStyle = handleGrad;
+      ctx.beginPath();
+      roundRectPath(-bladeW*0.55, bladeLen*0.18, bladeW*1.1, bladeLen*0.5, bladeW*0.32);
+      ctx.fill();
+
+      var bladeGrad = ctx.createLinearGradient(-bladeW*0.5,0,bladeW*0.5,0);
+      bladeGrad.addColorStop(0,"#5d616b"); bladeGrad.addColorStop(0.45,"#f2f4f7"); bladeGrad.addColorStop(0.58,"#c7ccd6"); bladeGrad.addColorStop(1,"#4a4e57");
+      ctx.fillStyle = bladeGrad;
+      ctx.beginPath();
+      ctx.moveTo(0, -bladeLen*0.58);
+      ctx.lineTo(bladeW*0.5, bladeLen*0.18);
+      ctx.lineTo(-bladeW*0.5, bladeLen*0.18);
+      ctx.closePath();
+      ctx.fill();
+      ctx.lineWidth = 0.9; ctx.strokeStyle = "rgba(25,25,30,0.55)"; ctx.stroke();
       ctx.restore();
     }
 
@@ -1384,6 +1504,54 @@
   function roundRectPath(x,y,w,h,r){
     ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r);
     ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath();
+  }
+
+  // Fuse wire: a fixed path from a spool anchor to the ghost card, with a
+  // traveling spark showing how much fuse is left (reaches the card
+  // exactly as fuseT hits 1, the same moment it auto-drops). Drawn as a
+  // shaded "tube" — dark base stroke, a mid-tone copper gradient body, and
+  // a thin bright highlight along one edge — for a rounded, cartoony-3D
+  // read rather than a flat line.
+  function drawFuseWire(targetX, targetY){
+    var originX = state.wallLeft + 14, originY = state.dangerY - 22;
+    var wobble = Math.sin(state.elapsed*3.2) * 6;
+    var midX = (originX+targetX)/2 + wobble, midY = Math.min(originY, targetY) - 14;
+
+    ctx.save();
+    ctx.lineCap = "round";
+    ctx.strokeStyle = "rgba(15,12,10,0.85)";
+    ctx.lineWidth = 5.5;
+    ctx.beginPath(); ctx.moveTo(originX,originY); ctx.quadraticCurveTo(midX,midY,targetX,targetY); ctx.stroke();
+
+    var wireGrad = ctx.createLinearGradient(originX,originY,targetX,targetY);
+    wireGrad.addColorStop(0,"#7a4a22"); wireGrad.addColorStop(0.5,"#c98a3e"); wireGrad.addColorStop(1,"#7a4a22");
+    ctx.strokeStyle = wireGrad;
+    ctx.lineWidth = 3.4;
+    ctx.beginPath(); ctx.moveTo(originX,originY); ctx.quadraticCurveTo(midX,midY,targetX,targetY); ctx.stroke();
+
+    ctx.strokeStyle = "rgba(255,224,150,0.55)";
+    ctx.lineWidth = 1.1;
+    ctx.beginPath(); ctx.moveTo(originX,originY-1); ctx.quadraticCurveTo(midX,midY-1,targetX,targetY-1); ctx.stroke();
+
+    // Spool anchor — a small drum the wire winds from.
+    var spoolGrad = ctx.createLinearGradient(originX-6,originY-6,originX+6,originY+6);
+    spoolGrad.addColorStop(0,"#4a4a52"); spoolGrad.addColorStop(1,"#1c1c22");
+    ctx.fillStyle = spoolGrad;
+    ctx.beginPath(); ctx.arc(originX, originY, 6, 0, Math.PI*2); ctx.fill();
+
+    // Traveling spark along the same quadratic curve, at t = fuseT.
+    var t = Math.min(1, state.fuseT);
+    var sx = (1-t)*(1-t)*originX + 2*(1-t)*t*midX + t*t*targetX;
+    var sy = (1-t)*(1-t)*originY + 2*(1-t)*t*midY + t*t*targetY;
+    var glow = ctx.createRadialGradient(sx,sy,0,sx,sy,10);
+    glow.addColorStop(0,"rgba(255,255,220,0.95)");
+    glow.addColorStop(0.4,"rgba(255,200,80,0.7)");
+    glow.addColorStop(1,"rgba(255,140,40,0)");
+    ctx.fillStyle = glow;
+    ctx.beginPath(); ctx.arc(sx, sy, 10, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = "#fff7e0";
+    ctx.beginPath(); ctx.arc(sx, sy, 2.4, 0, Math.PI*2); ctx.fill();
+    ctx.restore();
   }
 
   function draw(){
@@ -1420,22 +1588,32 @@
 
     state.balls.forEach(drawCard);
 
-    if (hardMode && state.fogActive){
-      // Sweeps left-to-right across the play field only (not the next-card
-      // preview or the aim ghost), so it's a "read the pile" challenge, not
-      // a "guess what you're even holding" one. Feathered via a gradient,
-      // not a flat fill, so it's reduced visibility rather than a hard cut.
-      // Kept narrow and low-alpha on purpose — an earlier pass at 130px/0.6
-      // read as a near-solid wall in a screenshot check, not a haze.
-      var fogSpan = (state.wallRight - state.wallLeft) + 90;
-      var fogCenterX = state.wallLeft - 45 + state.fogT * fogSpan;
-      var fogW = 70;
-      var fogGrad = ctx.createLinearGradient(fogCenterX-fogW/2, 0, fogCenterX+fogW/2, 0);
-      fogGrad.addColorStop(0, "rgba(205,199,220,0)");
-      fogGrad.addColorStop(0.5, "rgba(205,199,220,0.34)");
-      fogGrad.addColorStop(1, "rgba(205,199,220,0)");
-      ctx.fillStyle = fogGrad;
-      ctx.fillRect(fogCenterX-fogW/2, state.dangerY-14, fogW, state.floorY-(state.dangerY-14));
+    if (hardMode && state.fogActive && state.fogBand){
+      // Real fog, not a beam: a cluster of soft overlapping blobs (rolled
+      // once per sweep in rollFogShape) drifting together across a random
+      // section of the board — random vertical band, random horizontal
+      // span, irregular silhouette — instead of a fixed-width gradient
+      // rectangle sweeping the full height every time. Only the play field
+      // is affected (never the next-card preview or aim ghost), so it's a
+      // "read the pile" challenge, not a "guess what you're holding" one.
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(state.wallLeft, state.dangerY-10, state.wallRight-state.wallLeft, state.floorY-(state.dangerY-10));
+      ctx.clip();
+      var fb = state.fogBand;
+      var groupX = fb.startX + state.fogT * fb.travel;
+      state.fogPuffs.forEach(function(puff){
+        var px = groupX + puff.dx, py = fb.centerY + puff.dy;
+        var grad = ctx.createRadialGradient(px, py, 0, px, py, puff.r);
+        grad.addColorStop(0, "rgba(206,200,220,0.4)");
+        grad.addColorStop(0.65, "rgba(206,200,220,0.22)");
+        grad.addColorStop(1, "rgba(206,200,220,0)");
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(px, py, puff.r, 0, Math.PI*2);
+        ctx.fill();
+      });
+      ctx.restore();
     }
 
     if (hardMode && (state.rouletteSpinning || state.rouletteFlashTimer > 0)){
@@ -1484,8 +1662,9 @@
     });
 
     if (!state.gameOver){
-      var ghost = { x: state.aimX, y: state.dangerY - CARD_R - 6, r: CARD_R, rank: state.queue[0].rank, suit: state.queue[0].suit, joker: state.queue[0].joker, rot:0 };
+      var ghost = { x: state.aimX, y: state.dangerY - CARD_R - 6, r: CARD_R, rank: state.queue[0].rank, suit: state.queue[0].suit, joker: state.queue[0].joker, blank: state.queue[0].blank, rot:0 };
       ctx.globalAlpha = 0.92; drawCard(ghost); ctx.globalAlpha = 1;
+      if (state.fuseActive) drawFuseWire(ghost.x, ghost.y);
 
       ctx.strokeStyle = "rgba(243,236,225,0.18)";
       ctx.setLineDash([2,5]);
@@ -1494,7 +1673,7 @@
 
       var nx = state.wallRight - CARD_R - 4, ny = state.dangerY - 34;
       ctx.globalAlpha = 0.6;
-      drawCard({x:nx,y:ny,r:CARD_R*0.8,rank:state.queue[1].rank,suit:state.queue[1].suit,joker:state.queue[1].joker,rot:0.12});
+      drawCard({x:nx,y:ny,r:CARD_R*0.8,rank:state.queue[1].rank,suit:state.queue[1].suit,joker:state.queue[1].joker,blank:state.queue[1].blank,rot:0.12});
       ctx.globalAlpha = 1;
       ctx.fillStyle = "rgba(180,168,194,0.8)";
       ctx.font = "700 9px 'Space Mono', monospace";
@@ -1504,7 +1683,7 @@
       if (unlockedAchv.oracle){
         var nx2 = nx - CARD_R*1.7, ny2 = ny;
         ctx.globalAlpha = 0.4;
-        drawCard({x:nx2,y:ny2,r:CARD_R*0.7,rank:state.queue[2].rank,suit:state.queue[2].suit,joker:state.queue[2].joker,rot:-0.1});
+        drawCard({x:nx2,y:ny2,r:CARD_R*0.7,rank:state.queue[2].rank,suit:state.queue[2].suit,joker:state.queue[2].joker,blank:state.queue[2].blank,rot:-0.1});
         ctx.globalAlpha = 1;
         ctx.fillStyle = "rgba(180,168,194,0.6)";
         ctx.font = "700 8px 'Space Mono', monospace";
