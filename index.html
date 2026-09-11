@@ -71,6 +71,7 @@
 
   .zen-toggle{ display:flex; align-items:center; gap:8px; font-size:11px; color:var(--ink-faint); cursor:pointer; letter-spacing:0.01em; }
   .zen-toggle input{ accent-color:var(--teal); width:14px; height:14px; flex:0 0 auto; cursor:pointer; }
+  .zen-tag{ font-family:'Space Mono',monospace; font-size:8.5px; font-weight:700; letter-spacing:.06em; color:var(--teal); border:1px solid var(--teal); border-radius:4px; padding:1px 4px; vertical-align:middle; }
 
   .hud{ display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
   .chip{ background:linear-gradient(160deg,var(--felt),var(--bg-1)); border:1px solid var(--felt-edge); border-radius:10px; padding:9px 12px; }
@@ -621,7 +622,7 @@
       return '<div class="history-row">' +
         '<span class="hs">' + r.score.toLocaleString() + '</span>' +
         '<div class="hmeta">' +
-          '<span class="hb">' + (r.bestHand || "No hand cleared") + '</span>' +
+          '<span class="hb">' + (r.bestHand || "No hand cleared") + (r.zen ? ' <span class="zen-tag">ZEN</span>' : '') + '</span>' +
           '<span class="hd">' + formatDuration(r.duration) + ' &middot; ' + formatHistoryDate(r.date) + '</span>' +
         '</div>' +
       '</div>';
@@ -676,6 +677,7 @@
       shieldTime: 0,
       bestHandLabel: null, bestHandScore: 0,
       hasStarted: false,
+      zenEverUsed: false,
       gameOver: false
     };
   }
@@ -853,6 +855,10 @@
     // reading the onboarding modal or Hand Guide before ever touching the
     // game was silently burning into the difficulty clock.
     if (state.hasStarted) state.elapsed += dt;
+    // Zen can be toggled live, mid-run — track whether it was ever active
+    // during this run (not just whether it's on right now) so a run that
+    // spent even part of itself in Zen doesn't get to count as a normal one.
+    if (zenMode) state.zenEverUsed = true;
     var pT = pressureT();
     state.dangerY = DANGER_Y_BASE + pT*20;
     if (pT >= 1 && !state.pressureMaxWarned){ state.pressureMaxWarned = true; showToast("Pressure maxed — the felt won't get any smaller"); }
@@ -956,12 +962,16 @@
     state.gameOver = true;
     state.bonusActive = false;
     document.getElementById("bonusPanel").hidden = true;
-    if (state.score > saved.best){ saved.best = state.score; persistBest(); }
+    // Zen runs never count toward Best — the whole point of Zen is a run
+    // with the difficulty ramp held at 0, so its score isn't comparable to
+    // a real run's and shouldn't be able to inflate the record.
+    if (!state.zenEverUsed && state.score > saved.best){ saved.best = state.score; persistBest(); }
     runHistory.unshift({
       score: Math.round(state.score),
       bestHand: state.bestHandLabel,
       duration: Math.round(state.elapsed),
-      date: Date.now()
+      date: Date.now(),
+      zen: state.zenEverUsed
     });
     if (runHistory.length > HISTORY_MAX) runHistory.length = HISTORY_MAX;
     persistHistory();
@@ -971,7 +981,9 @@
     checkAchievements({ survivedSeconds: state.elapsed, historyCount: runHistory.length });
     sfxGameOver();
     document.getElementById("finalScore").textContent = Math.round(state.score).toLocaleString();
-    document.getElementById("recordLine").textContent = (state.score >= saved.best) ? "New best!" : ("Best " + Math.round(saved.best).toLocaleString());
+    document.getElementById("recordLine").textContent = state.zenEverUsed
+      ? "Zen run — not counted toward Best"
+      : ((state.score >= saved.best) ? "New best!" : ("Best " + Math.round(saved.best).toLocaleString()));
     document.getElementById("gameOverOverlay").hidden = false;
   }
 
