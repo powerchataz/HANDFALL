@@ -203,11 +203,11 @@
     border-radius:999px; opacity:0; transition:opacity .25s ease, transform .25s ease; pointer-events:none; white-space:nowrap;
   }
   .toast.show{opacity:1; transform:translate(-50%,0);}
-
-  @media (prefers-reduced-motion: reduce){ .toast{transition:none;} }
-</style>
 </head>
 <body>
+  @media (prefers-reduced-motion: reduce){ .toast{transition:none;} }
+</style>
+
 <div class="app">
   <header>
     <div class="title-block">
@@ -734,6 +734,8 @@
       knifeReady: false, knifeTimer: 16 + Math.random()*16,
       fuseActive: false, fuseT: 0,
       wireWobbleX: 0, wireWobbleVX: 0, lastAimForWire: LOGICAL_W/2,
+      wireEmberTimer: 0,
+      wireCutAnim: null,
       gameOver: false
     };
   }
@@ -860,13 +862,35 @@
   // far yet) instead of where it would have naturally settled. It still
   // participates normally in matches and in danger-line detection —
   // getting pinned somewhere dangerous is exactly the risk.
+  var KNIFE_IMPACT_DURATION = 0.5;
   function pinCardWithKnife(target){
     target.pinned = true;
     target.vx = 0; target.vy = 0;
-    spawnParticles(target.x, target.y, "rgb(220,220,225)", 10);
-    triggerShake(4);
+    // knifeImpactT drives a plunge-in-and-stick animation in drawCard — the
+    // knife swings in from an angle and thunks home with a settling quiver,
+    // purely cosmetic (the pin/freeze above is what actually stops the
+    // card; this never applies force to it or to any neighbor).
+    target.knifeImpactT = 0;
+    spawnParticles(target.x, target.y, "rgb(220,220,225)", 14);
+    triggerShake(5);
     sfxKnife();
     showToast("🔪 A card gets pinned in place");
+  }
+
+  // Wire cut: a manual drop that beats the fuse to zero snaps the wire
+  // loose instead of it just vanishing. Captures the wire's current shape
+  // (including whatever wobble/sway was already happening) and lets the
+  // freed end fall under gravity with residual swing, purely a cosmetic
+  // overlay — the actual fuse/fire state resets normally alongside it.
+  function triggerWireCut(targetX, targetY){
+    var originX = state.wallLeft + 14, originY = state.dangerY - 22;
+    state.wireCutAnim = {
+      t: 0, duration: 0.85,
+      originX: originX, originY: originY,
+      x: targetX, y: targetY,
+      vx: state.wireWobbleVX * 3.5, vy: -40,
+      swingAngle: 0, swingVel: (Math.random()-0.5) * 4 + state.wireWobbleVX * 0.15
+    };
   }
 
   // Rolls a fresh, irregular fog shape + a random section of the board for
@@ -1152,14 +1176,42 @@
         // dragged, like a loose wire under tension) and by triggerShake
         // (see above). Deliberately under-damped so it overshoots and
         // oscillates before settling — stiff/critically-damped would read
-        // as rigid, not flimsy.
+        // as rigid, not flimsy. Tuned looser than the first pass (lower
+        // spring constant, stronger drag-response) so a deliberate left-
+        // right aim sweep produces a visible, unmistakable swing rather
+        // than a subtle twitch.
         var aimDelta = state.aimX - state.lastAimForWire;
-        state.wireWobbleVX += aimDelta * 0.8;
+        state.wireWobbleVX += aimDelta * 1.35;
         state.lastAimForWire = state.aimX;
-        state.wireWobbleVX += (0 - state.wireWobbleX) * 90 * dt;
-        state.wireWobbleVX *= 0.92;
+        state.wireWobbleVX += (0 - state.wireWobbleX) * 62 * dt;
+        state.wireWobbleVX *= 0.94;
         state.wireWobbleX += state.wireWobbleVX * dt;
+
+        // The wire burns up from the spool end as the spark travels —
+        // rendered in drawFuseWire as only the unburnt segment ahead of
+        // the spark. Embers disperse off the burn point (cosmetic
+        // particles only, same pool as match/impact particles) at a
+        // throttled rate so it reads as consumption, not a static line.
+        state.wireEmberTimer -= dt;
+        if (state.wireEmberTimer <= 0){
+          state.wireEmberTimer = 0.05 + Math.random()*0.05;
+          var originXe = state.wallLeft + 14, originYe = state.dangerY - 22;
+          var targetXe = state.aimX, targetYe = state.dangerY - CARD_R - 6;
+          var spanE = Math.abs(targetXe - originXe);
+          var sagE = 14 + spanE*0.16;
+          var midXe = (originXe+targetXe)/2 + state.wireWobbleX, midYe = Math.max(originYe, targetYe) + sagE;
+          var te = Math.min(1, state.fuseT);
+          var mte = 1-te;
+          var ex = mte*mte*originXe + 2*mte*te*midXe + te*te*targetXe;
+          var ey = mte*mte*originYe + 2*mte*te*midYe + te*te*targetYe;
+          spawnParticles(ex, ey, "rgb(255,150,60)", 1 + Math.floor(Math.random()*2));
+        }
       } else {
+        // If the fuse was active and hadn't finished (a manual early drop,
+        // not the natural auto-drop at fuseT>=1), the cut end snaps loose —
+        // triggerWireCut (called from tryDrop, before this state resets)
+        // has already captured a swinging-fall animation for it. Nothing
+        // extra to do here beyond the normal reset.
         state.fuseActive = false;
         state.fuseT = 0;
         state.wireWobbleX = 0; state.wireWobbleVX = 0;
@@ -1172,6 +1224,21 @@
       state.fuseT = 0;
     }
 
+    // Wire-cut fall animation: independent of hardMode/fuseActive gating so
+    // it always finishes playing out even if Hard Mode gets toggled off or
+    // the fuse state resets mid-flight.
+    if (state.wireCutAnim){
+      var wc = state.wireCutAnim;
+      wc.t += dt;
+      wc.vy += 340*dt;
+      wc.x += wc.vx*dt;
+      wc.y += wc.vy*dt;
+      wc.vx *= 0.985;
+      wc.swingAngle += wc.swingVel*dt;
+      wc.swingVel *= 0.95;
+      if (wc.t >= wc.duration) state.wireCutAnim = null;
+    }
+
     var pT = pressureT();
     state.dangerY = DANGER_Y_BASE + pT*20;
     if (pT >= 1 && !state.pressureMaxWarned){ state.pressureMaxWarned = true; showToast("Pressure maxed — the felt won't get any smaller"); }
@@ -1179,7 +1246,13 @@
     var balls = state.balls, g = GRAVITY * (1 + pT*0.35);
     for (var i=0;i<balls.length;i++){
       var b = balls[i];
-      if (b.pinned) continue; // knife-pinned: frozen in place, permanently
+      if (b.pinned){
+        // Position/velocity stay frozen (that's what actually stops the
+        // card), but the impact-animation clock keeps advancing so the
+        // knife's plunge-in-and-stick draws through to its settled quiver.
+        if (b.knifeImpactT !== undefined && b.knifeImpactT < KNIFE_IMPACT_DURATION + 0.01) b.knifeImpactT += dt;
+        continue;
+      }
       b.vy += g*dt; b.x += b.vx*dt; b.y += b.vy*dt; b.rot += b.angv*dt + b.vx*dt*0.01;
       if (b.x - b.r < state.wallLeft){ b.x = state.wallLeft + b.r; b.vx = Math.abs(b.vx)*0.4; }
       if (b.x + b.r > state.wallRight){ b.x = state.wallRight - b.r; b.vx = -Math.abs(b.vx)*0.4; }
@@ -1348,6 +1421,14 @@
     if (state.balls.length >= MAX_BALLS){ triggerGameOver(); return; }
     state.hasStarted = true;
     var card = state.queue[0];
+    // Dropping the bomb card yourself before the fuse runs out cuts the
+    // wire early (state.fuseT < 1 distinguishes this from the fuse's own
+    // auto-drop, which only calls tryDrop() once fuseT has already reached
+    // 1) — the loose end snaps free and swings/falls away instead of the
+    // wire just vanishing.
+    if (card.blank && state.fuseActive && state.fuseT < 1){
+      triggerWireCut(state.aimX, state.dangerY - CARD_R - 6);
+    }
     spawnBall(card, state.aimX, state.dangerY - CARD_R - 6);
 
     state.spamHeat = Math.min(3, state.spamHeat + 0.4);
@@ -1526,13 +1607,47 @@
       // (dark-bright-dark, like a rounded bevel catching light) and a
       // wood-tone gradient handle, plus a small impact shadow where the
       // tip meets the card. Doesn't cover the rank/suit, so the card is
-      // still identifiable, just visibly stuck.
-      ctx.save();
-      ctx.translate(s*0.08, -s*0.05);
-      ctx.rotate(-0.62);
-      var bladeLen = b.r*1.05, bladeW = b.r*0.3;
+      // still identifiable, just visibly stuck. Sized up noticeably from
+      // the original pass (per feedback) for a more dramatic presence.
+      //
+      // A knifeImpactT-driven plunge-in animation: the blade starts well
+      // off the card along the strike line at a steeper angle, eases in
+      // with a slight overshoot (easeOutBack) like a real thrown blade
+      // sticking home, then quivers briefly before settling still. This
+      // is purely a drawing-time interpolation of the same translate/
+      // rotate transform already used for the resting pose — it never
+      // touches ball position/velocity, so it cannot push or otherwise
+      // affect this card or any neighbor.
+      var baseTx = s*0.1, baseTy = -s*0.06, baseRot = -0.62;
+      var impactT = b.knifeImpactT === undefined ? KNIFE_IMPACT_DURATION : b.knifeImpactT;
+      var raw = Math.min(1, impactT / KNIFE_IMPACT_DURATION);
+      var c1 = 1.70158, c3 = c1 + 1;
+      var eased = 1 + c3*Math.pow(raw-1,3) + c1*Math.pow(raw-1,2);
+      var startTx = baseTx*2.8, startTy = baseTy*2.8, startRot = baseRot - 0.85;
+      var tx = startTx + (baseTx-startTx)*eased;
+      var ty = startTy + (baseTy-startTy)*eased;
+      var quiver = Math.sin(impactT*55) * 0.14 * Math.exp(-impactT*9);
+      var rot = startRot + (baseRot-startRot)*eased + quiver;
 
-      ctx.fillStyle = "rgba(20,15,10,0.35)";
+      // Brief motion-blur streak along the strike path while still
+      // in-flight, so the plunge itself reads as fast impact, not a fade-in.
+      if (raw < 0.45){
+        var streakA = (1 - raw/0.45) * 0.5;
+        ctx.save();
+        ctx.globalAlpha = streakA;
+        ctx.strokeStyle = "rgba(220,224,230,0.9)";
+        ctx.lineWidth = 2.4;
+        ctx.lineCap = "round";
+        ctx.beginPath(); ctx.moveTo(startTx, startTy); ctx.lineTo(tx, ty); ctx.stroke();
+        ctx.restore();
+      }
+
+      ctx.save();
+      ctx.translate(tx, ty);
+      ctx.rotate(rot);
+      var bladeLen = b.r*1.55, bladeW = b.r*0.42;
+
+      ctx.fillStyle = "rgba(20,15,10,0.4)";
       ctx.beginPath(); ctx.ellipse(0, bladeLen*0.05, bladeW*0.9, bladeW*0.4, 0, 0, Math.PI*2); ctx.fill();
 
       var handleGrad = ctx.createLinearGradient(-bladeW*0.55,0,bladeW*0.55,0);
@@ -1541,6 +1656,11 @@
       ctx.beginPath();
       roundRectPath(-bladeW*0.55, bladeLen*0.18, bladeW*1.1, bladeLen*0.5, bladeW*0.32);
       ctx.fill();
+      // A couple of rivet highlights on the handle for a chunkier, more
+      // physical read at the larger size.
+      ctx.fillStyle = "rgba(255,220,180,0.35)";
+      ctx.beginPath(); ctx.arc(0, bladeLen*0.32, bladeW*0.1, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(0, bladeLen*0.52, bladeW*0.1, 0, Math.PI*2); ctx.fill();
 
       var bladeGrad = ctx.createLinearGradient(-bladeW*0.5,0,bladeW*0.5,0);
       bladeGrad.addColorStop(0,"#5d616b"); bladeGrad.addColorStop(0.45,"#f2f4f7"); bladeGrad.addColorStop(0.58,"#c7ccd6"); bladeGrad.addColorStop(1,"#4a4e57");
@@ -1551,7 +1671,11 @@
       ctx.lineTo(-bladeW*0.5, bladeLen*0.18);
       ctx.closePath();
       ctx.fill();
-      ctx.lineWidth = 0.9; ctx.strokeStyle = "rgba(25,25,30,0.55)"; ctx.stroke();
+      ctx.lineWidth = 1.1; ctx.strokeStyle = "rgba(25,25,30,0.55)"; ctx.stroke();
+      // Center fuller (the groove down a real blade) for extra dimension.
+      ctx.strokeStyle = "rgba(255,255,255,0.3)";
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(0, -bladeLen*0.5); ctx.lineTo(0, bladeLen*0.14); ctx.stroke();
       ctx.restore();
     }
 
@@ -1578,6 +1702,7 @@
     var len = Math.sqrt(dx*dx+dy*dy) || 1;
     return { x: dx/len, y: dy/len };
   }
+  function lerpPt(ax,ay,bx,by,t){ return { x: ax+(bx-ax)*t, y: ay+(by-ay)*t }; }
   function drawFuseWire(targetX, targetY){
     var originX = state.wallLeft + 14, originY = state.dangerY - 22;
     // Real cable droop, not a taut arc pulled upward — a hanging wire sags
@@ -1590,26 +1715,37 @@
     // still even with no input.
     var midX = (originX+targetX)/2 + idleWobble + state.wireWobbleX, midY = Math.max(originY, targetY) + sag;
 
+    // The wire burns up from the spool end as the spark travels — split the
+    // full origin->mid->target quadratic at t=fuseT (De Casteljau) so only
+    // the unburnt segment ahead of the spark is ever drawn; the consumed
+    // segment behind it is simply gone, with embers dispersing off the
+    // burn point (spawned in stepPhysics).
+    var t = Math.min(1, state.fuseT);
+    var A = lerpPt(originX,originY,midX,midY,t);
+    var B = lerpPt(midX,midY,targetX,targetY,t);
+    var C = lerpPt(A.x,A.y,B.x,B.y,t);
+    var segOx = C.x, segOy = C.y, segMx = B.x, segMy = B.y;
+
     ctx.save();
     ctx.lineCap = "round";
     ctx.strokeStyle = "rgba(15,12,10,0.85)";
     ctx.lineWidth = 5.5;
-    ctx.beginPath(); ctx.moveTo(originX,originY); ctx.quadraticCurveTo(midX,midY,targetX,targetY); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(segOx,segOy); ctx.quadraticCurveTo(segMx,segMy,targetX,targetY); ctx.stroke();
 
-    var wireGrad = ctx.createLinearGradient(originX,originY,targetX,targetY);
+    var wireGrad = ctx.createLinearGradient(segOx,segOy,targetX,targetY);
     wireGrad.addColorStop(0,"#6b4020"); wireGrad.addColorStop(0.5,"#a06a34"); wireGrad.addColorStop(1,"#6b4020");
     ctx.strokeStyle = wireGrad;
     ctx.lineWidth = 3.6;
-    ctx.beginPath(); ctx.moveTo(originX,originY); ctx.quadraticCurveTo(midX,midY,targetX,targetY); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(segOx,segOy); ctx.quadraticCurveTo(segMx,segMy,targetX,targetY); ctx.stroke();
 
     // Twisted-cable texture: short alternating diagonal ticks along the
-    // curve, like a braided/coiled wire catching the light — cartoon
-    // exaggerated (thick, evenly spaced), not a literal weave.
+    // remaining curve, like a braided/coiled wire catching the light —
+    // cartoon exaggerated (thick, evenly spaced), not a literal weave.
     var segments = 12;
     for (var wi=1; wi<segments; wi++){
       var wt = wi/segments;
-      var p = bezierPoint(wt, originX,originY,midX,midY,targetX,targetY);
-      var tan = bezierTangent(wt, originX,originY,midX,midY,targetX,targetY);
+      var p = bezierPoint(wt, segOx,segOy,segMx,segMy,targetX,targetY);
+      var tan = bezierTangent(wt, segOx,segOy,segMx,segMy,targetX,targetY);
       var perpX = -tan.y, perpY = tan.x;
       var side = (wi % 2 === 0) ? 1 : -1;
       var tickLen = 2.6;
@@ -1621,23 +1757,51 @@
       ctx.stroke();
     }
 
-    // Spool anchor — a small drum the wire winds from.
+    // Spool anchor — a small drum the wire winds from. Dims as the burn
+    // reaches it, reading as spent rather than still feeding wire.
+    ctx.save();
+    ctx.globalAlpha = Math.max(0.15, 1 - t);
     var spoolGrad = ctx.createLinearGradient(originX-6,originY-6,originX+6,originY+6);
     spoolGrad.addColorStop(0,"#4a4a52"); spoolGrad.addColorStop(1,"#1c1c22");
     ctx.fillStyle = spoolGrad;
     ctx.beginPath(); ctx.arc(originX, originY, 6, 0, Math.PI*2); ctx.fill();
+    ctx.restore();
 
-    // Traveling spark along the same curve, at t = fuseT.
-    var t = Math.min(1, state.fuseT);
-    var spark = bezierPoint(t, originX,originY,midX,midY,targetX,targetY);
-    var glow = ctx.createRadialGradient(spark.x,spark.y,0,spark.x,spark.y,10);
+    // The traveling spark now sits exactly at the burn point (C) by
+    // construction, since that's the start of the unburnt segment.
+    var glow = ctx.createRadialGradient(C.x,C.y,0,C.x,C.y,10);
     glow.addColorStop(0,"rgba(255,255,220,0.95)");
     glow.addColorStop(0.4,"rgba(255,200,80,0.7)");
     glow.addColorStop(1,"rgba(255,140,40,0)");
     ctx.fillStyle = glow;
-    ctx.beginPath(); ctx.arc(spark.x, spark.y, 10, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(C.x, C.y, 10, 0, Math.PI*2); ctx.fill();
     ctx.fillStyle = "#fff7e0";
-    ctx.beginPath(); ctx.arc(spark.x, spark.y, 2.4, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(C.x, C.y, 2.4, 0, Math.PI*2); ctx.fill();
+    ctx.restore();
+  }
+
+  // Wire-cut fall: the loose end (once attached to the card) tumbles down
+  // and away under gravity with residual swing from whatever wobble it had
+  // at the moment it was cut, fading out as it "flops" out of frame —
+  // purely a decaying overlay, never touches any card's real physics.
+  function drawWireCutAnim(){
+    var wc = state.wireCutAnim;
+    if (!wc) return;
+    var a = Math.max(0, 1 - wc.t/wc.duration);
+    var swingX = Math.sin(wc.swingAngle) * 10 * a;
+    ctx.save();
+    ctx.globalAlpha = a;
+    ctx.lineCap = "round";
+    ctx.strokeStyle = "rgba(15,12,10,0.85)";
+    ctx.lineWidth = 5.5;
+    ctx.beginPath(); ctx.moveTo(wc.originX,wc.originY); ctx.quadraticCurveTo(wc.originX+swingX,(wc.originY+wc.y)/2,wc.x,wc.y); ctx.stroke();
+    var wireGrad = ctx.createLinearGradient(wc.originX,wc.originY,wc.x,wc.y);
+    wireGrad.addColorStop(0,"#6b4020"); wireGrad.addColorStop(0.5,"#a06a34"); wireGrad.addColorStop(1,"#6b4020");
+    ctx.strokeStyle = wireGrad;
+    ctx.lineWidth = 3.6;
+    ctx.beginPath(); ctx.moveTo(wc.originX,wc.originY); ctx.quadraticCurveTo(wc.originX+swingX,(wc.originY+wc.y)/2,wc.x,wc.y); ctx.stroke();
+    ctx.fillStyle = "rgba(90,60,30,0.85)";
+    ctx.beginPath(); ctx.arc(wc.x, wc.y, 3, 0, Math.PI*2); ctx.fill();
     ctx.restore();
   }
 
@@ -1749,6 +1913,10 @@
       ctx.fillText(pp.text, pp.x, pp.y);
       ctx.globalAlpha = 1;
     });
+
+    // Drawn regardless of game-over state so a cut wire from the drop that
+    // ended the run still finishes falling instead of cutting off.
+    drawWireCutAnim();
 
     if (!state.gameOver){
       var ghost = { x: state.aimX, y: state.dangerY - CARD_R - 6, r: CARD_R, rank: state.queue[0].rank, suit: state.queue[0].suit, joker: state.queue[0].joker, blank: state.queue[0].blank, rot:0 };
