@@ -2,7 +2,7 @@
 
 A physics card-drop game: cards fall under gravity onto a table, and any 2–5 *touching* cards that form a valid poker hand (Match through Royal Flush) clear together for points. Clearing hands is your only real relief from the table overflowing — that tension between where you drop and what you're hoping to complete is the whole game.
 
-Play it by opening `index.html` in a browser (or enable GitHub Pages on this repo to host it).
+Play it by opening `index.html` in a browser. A GitHub Actions workflow (`.github/workflows/deploy-pages.yml`) auto-deploys `main` to GitHub Pages on every push — it just needs this repo's **Settings → Pages → Source** set to **GitHub Actions** once (a one-time repo-admin setting this workflow can't flip on its own); after that, the live URL is whatever GitHub Pages shows on that same settings page.
 
 ## Controls
 
@@ -38,7 +38,7 @@ Unlike Zen, Hard Mode does **not** exclude a run from Best or achievements — i
 
 The game itself is a single self-contained `index.html` — vanilla JS + HTML5 Canvas 2D, no build step, no external libraries beyond Google Fonts. Procedural audio (Web Audio oscillators) and procedurally drawn cards — no image or sound assets. Progress (best score, achievements, run history, Zen/Hard toggle state, onboarding) persists via `localStorage`.
 
-A few small companion files round it out: `manifest.json` + `icon-512.png`/`apple-touch-icon.png` (installable as a home-screen app on mobile/desktop), and `tests/smoke.js`, a headless-browser sanity check (page loads clean, onboarding dismisses, a drop registers, both toggles engage, every modal opens and closes) that runs automatically in CI (`.github/workflows/smoke-test.yml`) on every push and pull request against `main`.
+A few small companion files round it out: `manifest.json` + `icon-512.png`/`apple-touch-icon.png` (installable as a home-screen app on mobile/desktop), `tests/smoke.js` — a headless-browser sanity check (page loads clean, onboarding dismisses, a drop registers, both toggles and the mute button engage, every modal opens and closes) that runs automatically on every push and pull request against `main` (`.github/workflows/smoke-test.yml`) — and `.github/workflows/deploy-pages.yml`, which publishes `main` to GitHub Pages on every push once Pages is pointed at GitHub Actions (see above).
 
 ## Status
 
