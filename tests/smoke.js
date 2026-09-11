@@ -56,6 +56,14 @@ function ok(msg) {
   await page.uncheck('#zenToggle');
   await page.uncheck('#hardToggle');
 
+  // Mute button should flip aria-pressed/label without throwing.
+  const mutedBefore = await page.getAttribute('#muteBtn', 'aria-pressed');
+  await page.click('#muteBtn');
+  const mutedAfter = await page.getAttribute('#muteBtn', 'aria-pressed');
+  if (mutedBefore === mutedAfter) fail('mute button did not change aria-pressed state');
+  else ok('mute button toggles correctly');
+  await page.click('#muteBtn'); // leave it unmuted for a clean end state
+
   // Each modal should open and close cleanly.
   for (const [openBtn, overlay, closeBtn] of [
     ['#guideBtn', '#guideOverlay', '#guideClose'],

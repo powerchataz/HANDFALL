@@ -73,6 +73,18 @@
     -webkit-background-clip:text; background-clip:text; color:transparent;
   }
   .title-text p{ margin:0; font-size:12px; color:var(--ink-dim); letter-spacing:0.03em; }
+  .header-actions{ flex:0 0 auto; display:flex; align-items:center; gap:8px; }
+  .icon-btn{
+    flex:0 0 auto; width:36px; height:36px; background:linear-gradient(160deg,var(--felt),var(--bg-1));
+    border:1px solid var(--felt-edge); color:var(--ink-dim); font-size:15px; border-radius:9px; cursor:pointer;
+    display:flex; align-items:center; justify-content:center;
+    transition:border-color .18s ease, color .18s ease, transform .15s ease, box-shadow .18s ease;
+  }
+  .icon-btn:hover{ border-color:var(--amber); color:var(--amber); transform:translateY(-1px); box-shadow:0 8px 16px -10px rgba(240,166,58,.4); }
+  .icon-btn:active{ transform:translateY(0); box-shadow:none; }
+  .icon-btn:focus-visible{ outline:2px solid var(--amber); outline-offset:2px; }
+  .icon-btn[aria-pressed="true"]{ color:var(--danger); border-color:color-mix(in srgb, var(--danger) 45%, var(--felt-edge)); }
+  @media (prefers-reduced-motion: reduce){ .icon-btn{ transition:none; } }
   .new-game{
     flex:0 0 auto; background:linear-gradient(160deg,var(--felt),var(--bg-1)); border:1px solid var(--felt-edge); color:var(--ink-dim);
     font-family:'Space Mono',monospace; font-size:11.5px; letter-spacing:0.06em; text-transform:uppercase;
@@ -317,7 +329,10 @@
         <p>drop cards &middot; connect a poker hand &middot; clear it before the felt overflows</p>
       </div>
     </div>
-    <button class="new-game" id="newGameBtn" type="button">New Game</button>
+    <div class="header-actions">
+      <button class="icon-btn" id="muteBtn" type="button" aria-label="Mute sound" aria-pressed="false">🔊</button>
+      <button class="new-game" id="newGameBtn" type="button">New Game</button>
+    </div>
   </header>
 
   <div class="hud">
@@ -440,6 +455,7 @@
   var ONBOARD_KEY = "handfall_onboarded_v1";
   var ZEN_KEY = "handfall_zen_v1";
   var HARD_KEY = "handfall_hard_v1";
+  var MUTE_KEY = "handfall_muted_v1";
   var HISTORY_MAX = 20;
   var saved = { best: 0 };
   var unlockedAchv = {};
@@ -468,12 +484,17 @@
   try {
     hardMode = localStorage.getItem(HARD_KEY) === "1";
   } catch (e) { hardMode = false; }
+  var muted = false;
+  try {
+    muted = localStorage.getItem(MUTE_KEY) === "1";
+  } catch (e) { muted = false; }
   function persistBest(){ try { localStorage.setItem(SAVE_KEY, JSON.stringify({ best: saved.best })); } catch (e) {} }
   function persistAchv(){ try { localStorage.setItem(ACHV_KEY, JSON.stringify(unlockedAchv)); } catch (e) {} }
   function persistHistory(){ try { localStorage.setItem(HISTORY_KEY, JSON.stringify(runHistory)); } catch (e) {} }
   function persistOnboarded(){ try { localStorage.setItem(ONBOARD_KEY, "1"); } catch (e) {} }
   function persistZen(){ try { localStorage.setItem(ZEN_KEY, zenMode ? "1" : "0"); } catch (e) {} }
   function persistHard(){ try { localStorage.setItem(HARD_KEY, hardMode ? "1" : "0"); } catch (e) {} }
+  function persistMute(){ try { localStorage.setItem(MUTE_KEY, muted ? "1" : "0"); } catch (e) {} }
 
   // ---------- audio ----------
   var actx = null;
@@ -482,7 +503,7 @@
     else if (actx.state === "suspended") actx.resume();
   }
   function tone(freq, dur, opts){
-    if (!actx) return;
+    if (!actx || muted) return;
     opts = opts || {};
     var type = opts.type || "sine";
     var gainAmt = opts.gain != null ? opts.gain : 0.18;
@@ -2142,6 +2163,21 @@
     hardMode = hardCheckbox.checked;
     persistHard();
     if (!hardMode && state){ state.fogActive = false; state.rouletteSpinning = false; state.knifeReady = false; }
+  });
+
+  // ---------- mute ----------
+  var muteBtn = document.getElementById("muteBtn");
+  function updateMuteBtn(){
+    muteBtn.textContent = muted ? "🔇" : "🔊";
+    muteBtn.setAttribute("aria-pressed", muted ? "true" : "false");
+    muteBtn.setAttribute("aria-label", muted ? "Unmute sound" : "Mute sound");
+  }
+  updateMuteBtn();
+  muteBtn.addEventListener("click", function(){
+    muted = !muted;
+    persistMute();
+    updateMuteBtn();
+    if (!muted) ensureAudio();
   });
 
   newGame(); resize(); requestAnimationFrame(loop);
