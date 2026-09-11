@@ -235,7 +235,7 @@
 
   <label class="zen-toggle" for="hardToggle">
     <input type="checkbox" id="hardToggle">
-    <span>Hard mode &mdash; fog sweeps, roulette, and a rare blank card that detonates</span>
+    <span>Hard mode &mdash; fog, roulette, a detonating blank card, and a knife that pins a dropped card in place</span>
   </label>
 
   <div class="table-wrap">
@@ -407,6 +407,10 @@
   function sfxBlank(){
     tone(160, 0.28, { type: "sawtooth", gain: 0.2, slideTo: 40 });
     tone(90, 0.35, { type: "square", gain: 0.14, slideTo: 30, delay: 0.03 });
+  }
+  function sfxKnife(){
+    tone(900, 0.06, { type: "triangle", gain: 0.16, slideTo: 200 });
+    tone(150, 0.1, { type: "square", gain: 0.12, slideTo: 60, delay: 0.05 });
   }
 
   // ---------- cards ----------
@@ -718,6 +722,8 @@
       fogActive: false, fogT: 0, fogDuration: 3.5, fogTimer: 14 + Math.random()*14,
       rouletteSpinning: false, rouletteSpinT: 0, rouletteTimer: 18 + Math.random()*18,
       rouletteFlashTimer: 0, rouletteFlashHit: false,
+      dropSeq: 0,
+      knifeReady: false, knifeTimer: 16 + Math.random()*16,
       gameOver: false
     };
   }
@@ -737,6 +743,15 @@
   var ROULETTE_HIT_CHANCE = 0.18;
   var ROULETTE_MIN_INTERVAL = 20;
   var ROULETTE_MAX_INTERVAL = 44;
+
+  // Hard Mode knife tuning. Independent timer from fog/roulette/blank —
+  // per design direction, every Hard Mode hazard runs on its own
+  // uncorrelated clock; nothing coordinates them or blocks them from
+  // overlapping. They CAN all fire at once — the low joint probability
+  // that keeps that "very rare together" is just the natural product of
+  // each being independently rare, not an explicit anti-stacking rule.
+  var KNIFE_MIN_INTERVAL = 16;
+  var KNIFE_MAX_INTERVAL = 38;
 
   // ---------- difficulty escalation ----------
   // Nothing about the base drop flow scales with time, so a player who
@@ -760,7 +775,8 @@
   function currentMult(){ return (1 + state.cascadeMult) * legacyMultiplier(); }
 
   function spawnBall(card, x, y){
-    state.balls.push({ x:x, y:y, vx:0, vy:0, r:CARD_R, rank:card.rank, suit:card.suit, joker:!!card.joker, blank:!!card.blank, detonated:false, rot:(Math.random()-0.5)*0.2, angv:(Math.random()-0.5)*0.4, restTime:0 });
+    state.dropSeq++;
+    state.balls.push({ x:x, y:y, vx:0, vy:0, r:CARD_R, rank:card.rank, suit:card.suit, joker:!!card.joker, blank:!!card.blank, detonated:false, pinned:false, seq:state.dropSeq, rot:(Math.random()-0.5)*0.2, angv:(Math.random()-0.5)*0.4, restTime:0 });
   }
   function spawnParticles(x,y,color,n){
     for (var i=0;i<n;i++){
@@ -803,6 +819,23 @@
       : "💥 Blank card detonates");
     var removeSet = toDelete.concat([bomb]);
     state.balls = state.balls.filter(function(b){ return removeSet.indexOf(b) === -1; });
+  }
+
+  // Knife: pins the most recently dropped card still in flight exactly
+  // where it currently is — permanent for the rest of the run. Unlike
+  // detonateBlank, nothing is deleted or scored; the hazard is purely
+  // positional: a card stuck wherever the knife caught it (often still
+  // high up, near where it was dropped, since it usually hasn't fallen
+  // far yet) instead of where it would have naturally settled. It still
+  // participates normally in matches and in danger-line detection —
+  // getting pinned somewhere dangerous is exactly the risk.
+  function pinCardWithKnife(target){
+    target.pinned = true;
+    target.vx = 0; target.vy = 0;
+    spawnParticles(target.x, target.y, "rgb(220,220,225)", 10);
+    triggerShake(4);
+    sfxKnife();
+    showToast("🔪 A card gets pinned in place");
   }
 
   // ---------- match finding ----------
@@ -984,9 +1017,29 @@
         if (state.rouletteTimer <= 0){ state.rouletteSpinning = true; state.rouletteSpinT = 0; }
       }
       if (state.rouletteFlashTimer > 0) state.rouletteFlashTimer -= dt;
+
+      // Knife: own independent timer. Once it expires, it goes "armed" and
+      // waits (checked every tick, no extra delay) for the next card still
+      // in flight — instant the moment one exists, since most drops are
+      // airborne only briefly. No visual telegraph before it happens; the
+      // suddenness is the point (unlike roulette's deliberate suspense).
+      if (state.knifeReady){
+        var inFlight = state.balls.filter(function(b){ return !b.pinned && !b.blank && b.restTime < MIN_REST_TIME; });
+        if (inFlight.length){
+          var target = inFlight[0];
+          for (var ki=1; ki<inFlight.length; ki++){ if (inFlight[ki].seq > target.seq) target = inFlight[ki]; }
+          pinCardWithKnife(target);
+          state.knifeReady = false;
+          state.knifeTimer = KNIFE_MIN_INTERVAL + Math.random() * (KNIFE_MAX_INTERVAL - KNIFE_MIN_INTERVAL);
+        }
+      } else {
+        state.knifeTimer -= dt;
+        if (state.knifeTimer <= 0) state.knifeReady = true;
+      }
     } else {
       state.fogActive = false;
       state.rouletteSpinning = false;
+      state.knifeReady = false;
     }
 
     var pT = pressureT();
@@ -996,6 +1049,7 @@
     var balls = state.balls, g = GRAVITY * (1 + pT*0.35);
     for (var i=0;i<balls.length;i++){
       var b = balls[i];
+      if (b.pinned) continue; // knife-pinned: frozen in place, permanently
       b.vy += g*dt; b.x += b.vx*dt; b.y += b.vy*dt; b.rot += b.angv*dt + b.vx*dt*0.01;
       if (b.x - b.r < state.wallLeft){ b.x = state.wallLeft + b.r; b.vx = Math.abs(b.vx)*0.4; }
       if (b.x + b.r > state.wallRight){ b.x = state.wallRight - b.r; b.vx = -Math.abs(b.vx)*0.4; }
@@ -1009,15 +1063,24 @@
           var dist=Math.sqrt(dx*dx+dy*dy)||0.0001;
           var minDist=A.r+B.r;
           if (dist < minDist){
-            var overlap = minDist-dist, nx=dx/dist, ny=dy/dist, push=overlap/2;
-            A.x -= nx*push; A.y -= ny*push; B.x += nx*push; B.y += ny*push;
+            // A pinned card is immovable: it takes none of the position
+            // correction or the velocity impulse, so other cards bounce
+            // off it like a fixed obstacle instead of nudging it loose.
+            var overlap = minDist-dist, nx=dx/dist, ny=dy/dist;
+            var pushA = A.pinned ? 0 : (B.pinned ? overlap : overlap/2);
+            var pushB = B.pinned ? 0 : (A.pinned ? overlap : overlap/2);
+            A.x -= nx*pushA; A.y -= ny*pushA; B.x += nx*pushB; B.y += ny*pushB;
             var relvx=B.vx-A.vx, relvy=B.vy-A.vy, rel=relvx*nx+relvy*ny;
-            if (rel < 0){ var imp=-rel*0.22; A.vx-=nx*imp; A.vy-=ny*imp; B.vx+=nx*imp; B.vy+=ny*imp; }
+            if (rel < 0){
+              var imp=-rel*0.22;
+              if (!A.pinned){ A.vx-=nx*imp; A.vy-=ny*imp; }
+              if (!B.pinned){ B.vx+=nx*imp; B.vy+=ny*imp; }
+            }
           }
         }
       }
     }
-    for (var di=0; di<balls.length; di++){ balls[di].vx *= 0.985; balls[di].vy *= 0.99; }
+    for (var di=0; di<balls.length; di++){ if (!balls[di].pinned){ balls[di].vx *= 0.985; balls[di].vy *= 0.99; } }
 
     // A card must stay below REST_SPEED continuously for MIN_REST_TIME
     // before it's eligible to participate in a match — not just be slow on
@@ -1305,6 +1368,17 @@
     ctx.textAlign = "left"; ctx.textBaseline = "top";
     ctx.fillText(RANKS[b.rank], -s/2 + b.r*0.12, -s/2*1.28 + b.r*0.1);
 
+    if (b.pinned){
+      // Knife overlay — drawn on top of the normal face, doesn't cover the
+      // rank/suit so the card is still identifiable, just visibly stuck.
+      ctx.save();
+      ctx.rotate(-0.55);
+      ctx.font = Math.round(b.r*0.85) + "px system-ui, sans-serif";
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText("🔪", s/2*0.55, -s/2*0.55);
+      ctx.restore();
+    }
+
     ctx.restore();
   }
   function roundRectPath(x,y,w,h,r){
@@ -1514,7 +1588,7 @@
   hardCheckbox.addEventListener("change", function(){
     hardMode = hardCheckbox.checked;
     persistHard();
-    if (!hardMode && state){ state.fogActive = false; state.rouletteSpinning = false; }
+    if (!hardMode && state){ state.fogActive = false; state.rouletteSpinning = false; state.knifeReady = false; }
   });
 
   newGame(); resize(); requestAnimationFrame(loop);
