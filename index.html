@@ -71,7 +71,9 @@
 
   .zen-toggle{ display:flex; align-items:center; gap:8px; font-size:11px; color:var(--ink-faint); cursor:pointer; letter-spacing:0.01em; }
   .zen-toggle input{ accent-color:var(--teal); width:14px; height:14px; flex:0 0 auto; cursor:pointer; }
+  .zen-toggle input#hardToggle{ accent-color:var(--danger); }
   .zen-tag{ font-family:'Space Mono',monospace; font-size:8.5px; font-weight:700; letter-spacing:.06em; color:var(--teal); border:1px solid var(--teal); border-radius:4px; padding:1px 4px; vertical-align:middle; }
+  .zen-tag.hard-tag{ color:var(--danger); border-color:var(--danger); margin-left:3px; }
 
   .hud{ display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
   .chip{ background:linear-gradient(160deg,var(--felt),var(--bg-1)); border:1px solid var(--felt-edge); border-radius:10px; padding:9px 12px; }
@@ -231,6 +233,11 @@
     <span>Zen mode &mdash; no pressure ramp, just practice matching</span>
   </label>
 
+  <label class="zen-toggle" for="hardToggle">
+    <input type="checkbox" id="hardToggle">
+    <span>Hard mode &mdash; a rare fog sweep occasionally obscures the pile</span>
+  </label>
+
   <div class="table-wrap">
     <canvas id="game" width="340" height="560" role="img" aria-label="Handfall play field"></canvas>
     <div class="toast" id="toast"></div>
@@ -323,12 +330,14 @@
   var HISTORY_KEY = "handfall_history_v1";
   var ONBOARD_KEY = "handfall_onboarded_v1";
   var ZEN_KEY = "handfall_zen_v1";
+  var HARD_KEY = "handfall_hard_v1";
   var HISTORY_MAX = 20;
   var saved = { best: 0 };
   var unlockedAchv = {};
   var runHistory = [];
   var needsOnboarding = false;
   var zenMode = false;
+  var hardMode = false;
   try {
     var raw = localStorage.getItem(SAVE_KEY);
     if (raw) { var parsed = JSON.parse(raw); if (parsed && typeof parsed.best === "number") saved.best = parsed.best; }
@@ -347,11 +356,15 @@
   try {
     zenMode = localStorage.getItem(ZEN_KEY) === "1";
   } catch (e) { zenMode = false; }
+  try {
+    hardMode = localStorage.getItem(HARD_KEY) === "1";
+  } catch (e) { hardMode = false; }
   function persistBest(){ try { localStorage.setItem(SAVE_KEY, JSON.stringify({ best: saved.best })); } catch (e) {} }
   function persistAchv(){ try { localStorage.setItem(ACHV_KEY, JSON.stringify(unlockedAchv)); } catch (e) {} }
   function persistHistory(){ try { localStorage.setItem(HISTORY_KEY, JSON.stringify(runHistory)); } catch (e) {} }
   function persistOnboarded(){ try { localStorage.setItem(ONBOARD_KEY, "1"); } catch (e) {} }
   function persistZen(){ try { localStorage.setItem(ZEN_KEY, zenMode ? "1" : "0"); } catch (e) {} }
+  function persistHard(){ try { localStorage.setItem(HARD_KEY, hardMode ? "1" : "0"); } catch (e) {} }
 
   // ---------- audio ----------
   var actx = null;
@@ -627,7 +640,7 @@
       return '<div class="history-row">' +
         '<span class="hs">' + r.score.toLocaleString() + '</span>' +
         '<div class="hmeta">' +
-          '<span class="hb">' + (r.bestHand || "No hand cleared") + (r.zen ? ' <span class="zen-tag">ZEN</span>' : '') + '</span>' +
+          '<span class="hb">' + (r.bestHand || "No hand cleared") + (r.zen ? ' <span class="zen-tag">ZEN</span>' : '') + (r.hard ? ' <span class="zen-tag hard-tag">HARD</span>' : '') + '</span>' +
           '<span class="hd">' + formatDuration(r.duration) + ' &middot; ' + formatHistoryDate(r.date) + '</span>' +
         '</div>' +
       '</div>';
@@ -683,6 +696,8 @@
       bestHandLabel: null, bestHandScore: 0,
       hasStarted: false,
       zenEverUsed: false,
+      hardEverUsed: false,
+      fogActive: false, fogT: 0, fogDuration: 3.5, fogTimer: 14 + Math.random()*14,
       gameOver: false
     };
   }
@@ -864,6 +879,26 @@
     // during this run (not just whether it's on right now) so a run that
     // spent even part of itself in Zen doesn't get to count as a normal one.
     if (zenMode) state.zenEverUsed = true;
+
+    // Hard Mode: a rare fog bank sweeps across the board, visually obscuring
+    // cards underneath it — purely cosmetic, never changes a card's rank/
+    // suit or match eligibility. Gated on hasStarted for the same reason
+    // the pressure ramp and Bonus Draw timer were: without it, fog could
+    // start counting down (or even sweep) while the player is still on the
+    // onboarding modal or Hand Guide, before ever touching the game.
+    if (hardMode && state.hasStarted){
+      state.hardEverUsed = true;
+      if (state.fogActive){
+        state.fogT += dt / state.fogDuration;
+        if (state.fogT >= 1){ state.fogActive = false; state.fogT = 0; state.fogTimer = 16 + Math.random()*18; }
+      } else {
+        state.fogTimer -= dt;
+        if (state.fogTimer <= 0){ state.fogActive = true; state.fogT = 0; state.fogDuration = 3 + Math.random()*2; }
+      }
+    } else {
+      state.fogActive = false;
+    }
+
     var pT = pressureT();
     state.dangerY = DANGER_Y_BASE + pT*20;
     if (pT >= 1 && !state.pressureMaxWarned){ state.pressureMaxWarned = true; showToast("Pressure maxed — the felt won't get any smaller"); }
@@ -976,7 +1011,8 @@
       bestHand: state.bestHandLabel,
       duration: Math.round(state.elapsed),
       date: Date.now(),
-      zen: state.zenEverUsed
+      zen: state.zenEverUsed,
+      hard: state.hardEverUsed
     });
     if (runHistory.length > HISTORY_MAX) runHistory.length = HISTORY_MAX;
     persistHistory();
@@ -1193,6 +1229,24 @@
 
     state.balls.forEach(drawCard);
 
+    if (hardMode && state.fogActive){
+      // Sweeps left-to-right across the play field only (not the next-card
+      // preview or the aim ghost), so it's a "read the pile" challenge, not
+      // a "guess what you're even holding" one. Feathered via a gradient,
+      // not a flat fill, so it's reduced visibility rather than a hard cut.
+      // Kept narrow and low-alpha on purpose — an earlier pass at 130px/0.6
+      // read as a near-solid wall in a screenshot check, not a haze.
+      var fogSpan = (state.wallRight - state.wallLeft) + 90;
+      var fogCenterX = state.wallLeft - 45 + state.fogT * fogSpan;
+      var fogW = 70;
+      var fogGrad = ctx.createLinearGradient(fogCenterX-fogW/2, 0, fogCenterX+fogW/2, 0);
+      fogGrad.addColorStop(0, "rgba(205,199,220,0)");
+      fogGrad.addColorStop(0.5, "rgba(205,199,220,0.34)");
+      fogGrad.addColorStop(1, "rgba(205,199,220,0)");
+      ctx.fillStyle = fogGrad;
+      ctx.fillRect(fogCenterX-fogW/2, state.dangerY-14, fogW, state.floorY-(state.dangerY-14));
+    }
+
     state.particles.forEach(function(pt){
       var a = Math.max(0, pt.life/pt.maxLife);
       ctx.fillStyle = pt.color.replace("rgb(", "rgba(").replace(")", "," + (a*0.85) + ")");
@@ -1306,6 +1360,15 @@
     zenMode = zenCheckbox.checked;
     persistZen();
     updatePressureBar();
+  });
+
+  // ---------- hard mode toggle ----------
+  var hardCheckbox = document.getElementById("hardToggle");
+  hardCheckbox.checked = hardMode;
+  hardCheckbox.addEventListener("change", function(){
+    hardMode = hardCheckbox.checked;
+    persistHard();
+    if (!hardMode && state) state.fogActive = false;
   });
 
   newGame(); resize(); requestAnimationFrame(loop);
