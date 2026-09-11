@@ -530,6 +530,11 @@
   function unlockedCount(){ return ACHIEVEMENTS.filter(function(a){return unlockedAchv[a.id];}).length; }
   function legacyMultiplier(){ return 1 + unlockedCount()*0.02; }
   function checkAchievements(evalCtx){
+    // Same principle as Best: achievements grant a permanent +2% legacy
+    // score bonus applied to every future run, so unlocking one is an
+    // "official" outcome, not just a number on screen. A run Zen ever
+    // touched can't unlock any achievement for the rest of that run.
+    if (state.zenEverUsed) return;
     ACHIEVEMENTS.forEach(function(a){
       if (!unlockedAchv[a.id] && a.test(evalCtx)){
         unlockedAchv[a.id] = true;
