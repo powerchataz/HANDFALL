@@ -756,6 +756,12 @@
   var KNIFE_MIN_INTERVAL = 16;
   var KNIFE_MAX_INTERVAL = 38;
   var KNIFE_MIN_FALL_DISTANCE = 40;
+  // Real safety margin below the danger line, checked directly against
+  // state.dangerY at pin time (not an indirect fall-distance guess — see
+  // stepPhysics for why that failed). 40px covers the pressure ramp's full
+  // possible future rise (dangerY can climb at most 20px over a run) with
+  // 20px of margin left over even in the worst case.
+  var KNIFE_SAFE_MARGIN = 40;
 
   // Blank card fuse: when the blank card is up next to drop (queue[0]), a
   // wire visibly sparks and creeps toward it — the player can still drop it
@@ -1029,7 +1035,7 @@
       } else {
         state.fogTimer -= dt;
         if (state.fogTimer <= 0){
-          state.fogActive = true; state.fogT = 0; state.fogDuration = 3 + Math.random()*2.5;
+          state.fogActive = true; state.fogT = 0; state.fogDuration = 6 + Math.random()*3.5; // was 3-5.5s — slowed per feedback
           rollFogShape();
         }
       }
@@ -1077,11 +1083,27 @@
       // right where drops originate (at/near the danger line), before it
       // had visibly fallen at all. That's not "a card being dropped", and
       // pinning it there could force an unfair, near-immediate bust.
-      // Requiring real fall distance from spawnY ensures the card was
-      // actually seen in motion first.
+      //
+      // Real-play bug found after that fix: the 40px fall-distance
+      // requirement was STILL not enough to clear the danger line. A card
+      // spawns at dangerY-26 (dangerY - CARD_R - 6); its top edge only
+      // clears the line once y exceeds dangerY+CARD_R, i.e. after falling
+      // 46px — 6px MORE than the old threshold required. Since the knife
+      // fires the instant any candidate becomes eligible, it was pinning
+      // cards that were still barely inside the danger zone almost every
+      // time — a permanent pin there guarantees an eventual, often fast,
+      // bust with zero recourse. Fixed by checking the actual danger-line
+      // math directly (top edge below dangerY, with a real margin) instead
+      // of an indirect fall-distance guess. KNIFE_SAFE_MARGIN (40) also
+      // comfortably absorbs the pressure ramp's full range (dangerY can
+      // still creep up to 20px further over a run) without a card pinned
+      // safely today becoming newly "above the line" later just because
+      // the line crept down to it.
       if (state.knifeReady){
         var inFlight = state.balls.filter(function(b){
-          return !b.pinned && !b.blank && b.restTime < MIN_REST_TIME && (b.y - b.spawnY) >= KNIFE_MIN_FALL_DISTANCE;
+          return !b.pinned && !b.blank && b.restTime < MIN_REST_TIME &&
+            (b.y - b.spawnY) >= KNIFE_MIN_FALL_DISTANCE &&
+            (b.y - b.r) > state.dangerY + KNIFE_SAFE_MARGIN;
         });
         if (inFlight.length){
           var target = inFlight[0];
@@ -1512,10 +1534,24 @@
   // shaded "tube" — dark base stroke, a mid-tone copper gradient body, and
   // a thin bright highlight along one edge — for a rounded, cartoony-3D
   // read rather than a flat line.
+  function bezierPoint(t, x0,y0,x1,y1,x2,y2){
+    var mt = 1-t;
+    return { x: mt*mt*x0 + 2*mt*t*x1 + t*t*x2, y: mt*mt*y0 + 2*mt*t*y1 + t*t*y2 };
+  }
+  function bezierTangent(t, x0,y0,x1,y1,x2,y2){
+    var mt = 1-t;
+    var dx = 2*mt*(x1-x0) + 2*t*(x2-x1), dy = 2*mt*(y1-y0) + 2*t*(y2-y1);
+    var len = Math.sqrt(dx*dx+dy*dy) || 1;
+    return { x: dx/len, y: dy/len };
+  }
   function drawFuseWire(targetX, targetY){
     var originX = state.wallLeft + 14, originY = state.dangerY - 22;
-    var wobble = Math.sin(state.elapsed*3.2) * 6;
-    var midX = (originX+targetX)/2 + wobble, midY = Math.min(originY, targetY) - 14;
+    // Real cable droop, not a taut arc pulled upward — a hanging wire sags
+    // DOWN under its own weight, more so the further apart the ends are.
+    var span = Math.abs(targetX - originX);
+    var sag = 14 + span*0.16;
+    var wobble = Math.sin(state.elapsed*3.2) * 3;
+    var midX = (originX+targetX)/2 + wobble, midY = Math.max(originY, targetY) + sag;
 
     ctx.save();
     ctx.lineCap = "round";
@@ -1524,14 +1560,29 @@
     ctx.beginPath(); ctx.moveTo(originX,originY); ctx.quadraticCurveTo(midX,midY,targetX,targetY); ctx.stroke();
 
     var wireGrad = ctx.createLinearGradient(originX,originY,targetX,targetY);
-    wireGrad.addColorStop(0,"#7a4a22"); wireGrad.addColorStop(0.5,"#c98a3e"); wireGrad.addColorStop(1,"#7a4a22");
+    wireGrad.addColorStop(0,"#6b4020"); wireGrad.addColorStop(0.5,"#a06a34"); wireGrad.addColorStop(1,"#6b4020");
     ctx.strokeStyle = wireGrad;
-    ctx.lineWidth = 3.4;
+    ctx.lineWidth = 3.6;
     ctx.beginPath(); ctx.moveTo(originX,originY); ctx.quadraticCurveTo(midX,midY,targetX,targetY); ctx.stroke();
 
-    ctx.strokeStyle = "rgba(255,224,150,0.55)";
-    ctx.lineWidth = 1.1;
-    ctx.beginPath(); ctx.moveTo(originX,originY-1); ctx.quadraticCurveTo(midX,midY-1,targetX,targetY-1); ctx.stroke();
+    // Twisted-cable texture: short alternating diagonal ticks along the
+    // curve, like a braided/coiled wire catching the light — cartoon
+    // exaggerated (thick, evenly spaced), not a literal weave.
+    var segments = 12;
+    for (var wi=1; wi<segments; wi++){
+      var wt = wi/segments;
+      var p = bezierPoint(wt, originX,originY,midX,midY,targetX,targetY);
+      var tan = bezierTangent(wt, originX,originY,midX,midY,targetX,targetY);
+      var perpX = -tan.y, perpY = tan.x;
+      var side = (wi % 2 === 0) ? 1 : -1;
+      var tickLen = 2.6;
+      ctx.strokeStyle = side > 0 ? "rgba(255,214,140,0.5)" : "rgba(40,20,8,0.55)";
+      ctx.lineWidth = 1.1;
+      ctx.beginPath();
+      ctx.moveTo(p.x - tan.x*1.6, p.y - tan.y*1.6);
+      ctx.lineTo(p.x + perpX*tickLen*side + tan.x*1.6, p.y + perpY*tickLen*side + tan.y*1.6);
+      ctx.stroke();
+    }
 
     // Spool anchor — a small drum the wire winds from.
     var spoolGrad = ctx.createLinearGradient(originX-6,originY-6,originX+6,originY+6);
@@ -1539,18 +1590,17 @@
     ctx.fillStyle = spoolGrad;
     ctx.beginPath(); ctx.arc(originX, originY, 6, 0, Math.PI*2); ctx.fill();
 
-    // Traveling spark along the same quadratic curve, at t = fuseT.
+    // Traveling spark along the same curve, at t = fuseT.
     var t = Math.min(1, state.fuseT);
-    var sx = (1-t)*(1-t)*originX + 2*(1-t)*t*midX + t*t*targetX;
-    var sy = (1-t)*(1-t)*originY + 2*(1-t)*t*midY + t*t*targetY;
-    var glow = ctx.createRadialGradient(sx,sy,0,sx,sy,10);
+    var spark = bezierPoint(t, originX,originY,midX,midY,targetX,targetY);
+    var glow = ctx.createRadialGradient(spark.x,spark.y,0,spark.x,spark.y,10);
     glow.addColorStop(0,"rgba(255,255,220,0.95)");
     glow.addColorStop(0.4,"rgba(255,200,80,0.7)");
     glow.addColorStop(1,"rgba(255,140,40,0)");
     ctx.fillStyle = glow;
-    ctx.beginPath(); ctx.arc(sx, sy, 10, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(spark.x, spark.y, 10, 0, Math.PI*2); ctx.fill();
     ctx.fillStyle = "#fff7e0";
-    ctx.beginPath(); ctx.arc(sx, sy, 2.4, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(spark.x, spark.y, 2.4, 0, Math.PI*2); ctx.fill();
     ctx.restore();
   }
 
