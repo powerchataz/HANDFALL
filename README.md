@@ -42,4 +42,8 @@ A few small companion files round it out: `manifest.json` + `icon-512.png`/`appl
 
 ## Status
 
-Actively iterated prototype — mechanics, balance, and scope are still being tuned based on playtesting.
+Actively iterated prototype — mechanics, balance, and scope are still being tuned based on playtesting. See [CHANGELOG.md](CHANGELOG.md) for the full history.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
